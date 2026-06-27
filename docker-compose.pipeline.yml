@@ -1,0 +1,11 @@
+services:
+  academico-login:
+    image: acracademicoutn.azurecr.io/academicmgmtorgacademicologin:20
+    container_name: academico-login
+    restart: always
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production

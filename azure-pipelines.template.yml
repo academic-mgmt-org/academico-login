@@ -1,0 +1,253 @@
+# Reusable Docker pipeline template for academic microservices.
+#
+# Usage:
+# 1. Copy this file to azure-pipelines.yml in the target microservice.
+# 2. Adjust the parameters below for the service name, image repository,
+#    ports, remote path and environment variables.
+# 3. Create the referenced secret variables in Azure DevOps before running
+#    the pipeline. Example: DB_PASSWORD, LOGIN_API_KEY, etc.
+
+parameters:
+- name: dockerRegistryServiceConnection
+  type: string
+  default: '5cffc302-0a35-4b2b-8ea1-04a9ebd67c07'
+
+- name: containerRegistry
+  type: string
+  default: 'acracademicoutn.azurecr.io'
+
+- name: imageRepository
+  type: string
+  default: 'academicmgmtorgacademicomicroservicio'
+
+- name: containerName
+  type: string
+  default: 'academico-microservicio'
+
+- name: remoteAppPath
+  type: string
+  default: '/home/azureuser/academico-microservicio'
+
+- name: dockerfilePath
+  type: string
+  default: '$(Build.SourcesDirectory)/Dockerfile'
+
+- name: vmImageName
+  type: string
+  default: 'ubuntu-latest'
+
+- name: environmentName
+  type: string
+  default: 'servidor-gateway'
+
+# Optional space-separated host:container mappings. Examples:
+# - Gateway HTTP + gRPC: '3000:3000 50050:50050'
+#
+# Leave empty for single-port microservices. In that case, the deploy step
+# reads PORT from ${remoteAppPath}/.env and publishes PORT:PORT. For example,
+# academico-login reads /home/azureuser/academico-login/.env.
+- name: publishedPorts
+  type: string
+  default: ''
+
+# Optional old container names to remove during migration/rename.
+- name: legacyContainerNames
+  type: string
+  default: ''
+
+# Optional hard override passed to docker run. Keep production for Nest/Pino
+# images that install only production dependencies.
+- name: nodeEnv
+  type: string
+  default: 'production'
+
+# Space-separated list, in the order to write into the remote .env file.
+# PORT is intentionally omitted here: it is read from ${remoteAppPath}/.env
+# and preserved when the file is regenerated during deploy.
+- name: envVariableNames
+  type: string
+  default: 'NODE_ENV SERVICE_API_KEY DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD'
+
+# Values injected into the .env creation step. Use Azure DevOps secret
+# variables for sensitive values and plain literals for non-sensitive values.
+- name: envVariables
+  type: object
+  default:
+    NODE_ENV: 'production'
+    SERVICE_API_KEY: '$(SERVICE_API_KEY)'
+    DB_HOST: '$(DB_HOST)'
+    DB_PORT: '$(DB_PORT)'
+    DB_DATABASE: '$(DB_DATABASE)'
+    DB_USER: '$(DB_USER)'
+    DB_PASSWORD: '$(DB_PASSWORD)'
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+  tag: '$(Build.BuildId)'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: ${{ parameters.vmImageName }}
+    steps:
+    - task: Docker@2
+      displayName: Build and push an image to container registry
+      inputs:
+        command: buildAndPush
+        repository: ${{ parameters.imageRepository }}
+        dockerfile: ${{ parameters.dockerfilePath }}
+        containerRegistry: ${{ parameters.dockerRegistryServiceConnection }}
+        tags: |
+          $(tag)
+        addPipelineData: false
+
+- stage: Deploy
+  displayName: Deploy to personal server
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: DeployToPersonalServer
+    displayName: Deploy Docker container
+    environment:
+      name: ${{ parameters.environmentName }}
+      resourceType: virtualMachine
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Docker@2
+            displayName: Login to Azure Container Registry
+            inputs:
+              command: login
+              containerRegistry: ${{ parameters.dockerRegistryServiceConnection }}
+
+          - script: |
+              set -eu
+
+              echo "Creating environment folder and file..."
+              mkdir -p "$REMOTE_APP_PATH"
+
+              ENV_FILE="$REMOTE_APP_PATH/.env"
+              if [ ! -f "$ENV_FILE" ]; then
+                echo "Missing $ENV_FILE. Create it with PORT=<service-port> before deploying."
+                exit 1
+              fi
+
+              SERVICE_PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)
+
+              if [ -z "$SERVICE_PORT" ]; then
+                echo "Missing PORT in $ENV_FILE."
+                exit 1
+              fi
+
+              case "$SERVICE_PORT" in
+                *[!0-9]*)
+                  echo "Invalid PORT value in $ENV_FILE: $SERVICE_PORT"
+                  exit 1
+                  ;;
+              esac
+
+              umask 077
+              printf 'PORT=%s\n' "$SERVICE_PORT" > "$ENV_FILE"
+
+              for name in $ENV_VARIABLE_NAMES; do
+                if [ -z "${!name+x}" ]; then
+                  echo "Missing environment value for $name"
+                  exit 1
+                fi
+                printf '%s=%s\n' "$name" "${!name}" >> "$ENV_FILE"
+              done
+
+              chmod 600 "$ENV_FILE"
+            displayName: 'Create .env file on personal server'
+            env:
+              REMOTE_APP_PATH: ${{ parameters.remoteAppPath }}
+              ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
+              ${{ each envVar in parameters.envVariables }}:
+                ${{ envVar.key }}: ${{ envVar.value }}
+
+          - script: |
+              set -eu
+
+              IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
+              ENV_FILE="${REMOTE_APP_PATH}/.env"
+
+              echo "Pulling image..."
+              docker pull "$IMAGE"
+
+              echo "Stopping old container..."
+              docker rm -f "$CONTAINER_NAME" $LEGACY_CONTAINER_NAMES || true
+
+              RESOLVED_PUBLISHED_PORTS="$PUBLISHED_PORTS"
+              if [ -z "$RESOLVED_PUBLISHED_PORTS" ]; then
+                SERVICE_PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)
+                if [ -z "$SERVICE_PORT" ]; then
+                  echo "Missing PORT in $ENV_FILE and no publishedPorts parameter was provided."
+                  exit 1
+                fi
+                RESOLVED_PUBLISHED_PORTS="${SERVICE_PORT}:${SERVICE_PORT}"
+              fi
+
+              echo "Stopping any container using service ports..."
+              PORT_CONTAINERS=$(
+                for mapping in $RESOLVED_PUBLISHED_PORTS; do
+                  host_port="${mapping%%:*}"
+                  docker ps -q --filter "publish=${host_port}"
+                done | sort -u
+              )
+
+              if [ -n "$PORT_CONTAINERS" ]; then
+                docker rm -f $PORT_CONTAINERS
+              fi
+
+              PUBLISH_ARGS=()
+              for mapping in $RESOLVED_PUBLISHED_PORTS; do
+                PUBLISH_ARGS+=("-p" "$mapping")
+              done
+
+              NODE_ENV_ARGS=()
+              if [ -n "$NODE_ENV_OVERRIDE" ]; then
+                NODE_ENV_ARGS=("-e" "NODE_ENV=${NODE_ENV_OVERRIDE}")
+              fi
+
+              echo "Starting new container..."
+              docker run -d \
+                --name "$CONTAINER_NAME" \
+                --restart unless-stopped \
+                "${PUBLISH_ARGS[@]}" \
+                --env-file "$ENV_FILE" \
+                "${NODE_ENV_ARGS[@]}" \
+                "$IMAGE"
+
+              echo "Verifying container is running..."
+              sleep 5
+              if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+                echo "Container $CONTAINER_NAME did not stay running."
+                docker ps -a --filter "name=^/${CONTAINER_NAME}$"
+                docker logs --tail 200 "$CONTAINER_NAME" || true
+                exit 1
+              fi
+
+              echo "Cleaning up dangling images..."
+              docker image prune -f
+
+              echo "Deployment completed."
+            displayName: Run container on personal server
+            env:
+              CONTAINER_REGISTRY: ${{ parameters.containerRegistry }}
+              IMAGE_REPOSITORY: ${{ parameters.imageRepository }}
+              TAG: $(tag)
+              CONTAINER_NAME: ${{ parameters.containerName }}
+              LEGACY_CONTAINER_NAMES: ${{ parameters.legacyContainerNames }}
+              PUBLISHED_PORTS: ${{ parameters.publishedPorts }}
+              REMOTE_APP_PATH: ${{ parameters.remoteAppPath }}
+              NODE_ENV_OVERRIDE: ${{ parameters.nodeEnv }}

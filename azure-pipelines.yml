@@ -1,0 +1,227 @@
+# Docker
+# Build and push an image to Azure Container Registry
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: '5cffc302-0a35-4b2b-8ea1-04a9ebd67c07'
+  imageRepository: 'academicmgmtorgacademicologin'
+  containerRegistry: 'acracademicoutn.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+  # Container name on your personal server
+  containerName: 'academico-login'
+  prodSshHost: '20.115.132.131'
+  prodSshUser: 'azureuser'
+  prodRemoteAppPath: '/home/azureuser/academico-login'
+  prodComposeFile: 'docker-compose.pipeline.yml'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Build and push an image to container registry
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+        addPipelineData: false
+
+- stage: ApproveProduction
+  displayName: Approve production deployment
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: WaitForProductionApproval
+    displayName: Await production approval
+    pool: server
+    timeoutInMinutes: 1440
+    steps:
+    - task: ManualValidation@1
+      displayName: Approve production deployment
+      timeoutInMinutes: 1440
+      inputs:
+        notifyUsers: 'gacalderonr@utn.edu.ec'
+        approvers: 'gacalderonr@utn.edu.ec'
+        allowApproversToApproveTheirOwnRuns: true
+        instructions: 'Approve to deploy academico-login to production server 20.115.132.131.'
+        onTimeout: reject
+
+- stage: DeployProduction
+  displayName: Deploy to production
+  dependsOn: ApproveProduction
+  condition: succeeded()
+  jobs:
+  - job: DeployProduction
+    displayName: Deploy Docker Compose on production server
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Login to Azure Container Registry
+      inputs:
+        command: login
+        containerRegistry: $(dockerRegistryServiceConnection)
+
+    - script: |
+        set -euo pipefail
+
+        require_env() {
+          local name="$1"
+          if [ -z "${!name:-}" ]; then
+            echo "Missing required environment variable: $name"
+            exit 1
+          fi
+        }
+
+        for name in PROD_SSH_PRIVATE_KEY_B64 LOGIN_API_KEY DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
+          require_env "$name"
+        done
+
+        IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
+        SSH_DIR="$(mktemp -d)"
+        ENV_FILE_LOCAL="$(mktemp)"
+        COMPOSE_FILE_LOCAL="$(mktemp)"
+
+        cleanup() {
+          rm -rf "$SSH_DIR" "$ENV_FILE_LOCAL" "$COMPOSE_FILE_LOCAL"
+        }
+        trap cleanup EXIT
+
+        mkdir -p "$SSH_DIR"
+        chmod 700 "$SSH_DIR"
+        printf '%s' "$PROD_SSH_PRIVATE_KEY_B64" | base64 -d > "$SSH_DIR/key"
+        chmod 600 "$SSH_DIR/key"
+        ssh-keyscan -T 10 "$PROD_SSH_HOST" > "$SSH_DIR/known_hosts"
+
+        SSH_OPTS=(
+          -i "$SSH_DIR/key"
+          -o IdentitiesOnly=yes
+          -o UserKnownHostsFile="$SSH_DIR/known_hosts"
+          -o StrictHostKeyChecking=yes
+        )
+        REMOTE="${PROD_SSH_USER}@${PROD_SSH_HOST}"
+
+        DOCKER_CONFIG_FILE="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+        if [ ! -f "$DOCKER_CONFIG_FILE" ]; then
+          echo "Missing Docker config after ACR login: $DOCKER_CONFIG_FILE"
+          exit 1
+        fi
+
+        echo "Copying ACR Docker login to production server..."
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p ~/.docker && umask 077 && cat > ~/.docker/config.json" < "$DOCKER_CONFIG_FILE"
+
+        echo "Reading production service port..."
+        SERVICE_PORT="$(
+          ssh "${SSH_OPTS[@]}" "$REMOTE" \
+            "set -eu; ENV_FILE='$REMOTE_APP_PATH/.env'; if [ ! -f \"\$ENV_FILE\" ]; then echo \"Missing \$ENV_FILE\" >&2; exit 1; fi; sed -n 's/^PORT=//p' \"\$ENV_FILE\" | tail -n 1"
+        )"
+
+        if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
+          echo "Invalid PORT value in $REMOTE_APP_PATH/.env: $SERVICE_PORT"
+          exit 1
+        fi
+
+        umask 077
+        {
+          printf 'PORT=%s\n' "$SERVICE_PORT"
+          printf 'NODE_ENV=production\n'
+          printf 'LOGIN_API_KEY=%s\n' "$LOGIN_API_KEY"
+          printf 'DB_HOST=%s\n' "$DB_HOST"
+          printf 'DB_PORT=%s\n' "$DB_PORT"
+          printf 'DB_DATABASE=%s\n' "$DB_DATABASE"
+          printf 'DB_USER=%s\n' "$DB_USER"
+          printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
+        } > "$ENV_FILE_LOCAL"
+
+        cat > "$COMPOSE_FILE_LOCAL" << EOF
+        services:
+          academico-login:
+            image: ${IMAGE}
+            container_name: ${CONTAINER_NAME}
+            restart: always
+            ports:
+              - "${SERVICE_PORT}:${SERVICE_PORT}"
+            env_file:
+              - .env
+            environment:
+              - NODE_ENV=production
+        EOF
+
+        echo "Updating production .env and compose file..."
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p '$REMOTE_APP_PATH' && umask 077 && cat > '$REMOTE_APP_PATH/.env.pipeline'" < "$ENV_FILE_LOCAL"
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "mv '$REMOTE_APP_PATH/.env.pipeline' '$REMOTE_APP_PATH/.env' && chmod 600 '$REMOTE_APP_PATH/.env'"
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "cat > '$REMOTE_APP_PATH/$PROD_COMPOSE_FILE'" < "$COMPOSE_FILE_LOCAL"
+
+        echo "Deploying with Docker Compose..."
+        ssh "${SSH_OPTS[@]}" "$REMOTE" \
+          "REMOTE_APP_PATH='$REMOTE_APP_PATH' PROD_COMPOSE_FILE='$PROD_COMPOSE_FILE' CONTAINER_NAME='$CONTAINER_NAME' bash -se" << 'REMOTE_SCRIPT'
+        set -euo pipefail
+
+        cd "$REMOTE_APP_PATH"
+
+        if [ -f docker-compose.yml ]; then
+          echo "Stopping current compose project..."
+          docker compose -f docker-compose.yml down --remove-orphans || true
+        fi
+
+        echo "Stopping previous pipeline compose project..."
+        docker compose -f "$PROD_COMPOSE_FILE" down --remove-orphans || true
+
+        echo "Pulling production image..."
+        docker compose -f "$PROD_COMPOSE_FILE" pull
+
+        echo "Starting production compose project..."
+        docker compose -f "$PROD_COMPOSE_FILE" up -d --remove-orphans
+
+        echo "Verifying container is running..."
+        sleep 8
+        if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+          echo "Container $CONTAINER_NAME did not stay running."
+          docker ps -a --filter "name=^/${CONTAINER_NAME}$"
+          docker logs --tail 200 "$CONTAINER_NAME" || true
+          exit 1
+        fi
+
+        docker compose -f "$PROD_COMPOSE_FILE" ps
+
+        echo "Cleaning up dangling images..."
+        docker image prune -f
+
+        echo "Deployment completed."
+        REMOTE_SCRIPT
+      displayName: Deploy academico-login with Docker Compose
+      env:
+        CONTAINER_REGISTRY: $(containerRegistry)
+        IMAGE_REPOSITORY: $(imageRepository)
+        TAG: $(tag)
+        CONTAINER_NAME: $(containerName)
+        PROD_SSH_HOST: $(prodSshHost)
+        PROD_SSH_USER: $(prodSshUser)
+        REMOTE_APP_PATH: $(prodRemoteAppPath)
+        PROD_COMPOSE_FILE: $(prodComposeFile)
+        PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
+        LOGIN_API_KEY: $(LOGIN_API_KEY)
+        DB_HOST: $(DB_HOST)
+        DB_PORT: $(DB_PORT)
+        DB_DATABASE: $(DB_DATABASE)
+        DB_USER: $(DB_USER)
+        DB_PASSWORD: $(DB_PASSWORD)

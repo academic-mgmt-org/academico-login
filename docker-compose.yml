@@ -1,0 +1,14 @@
+services:
+  academico-login:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: academico-login:latest
+    container_name: academico-login
+    restart: always
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
