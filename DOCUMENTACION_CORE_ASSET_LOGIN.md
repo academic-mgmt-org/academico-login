@@ -55,8 +55,6 @@ Este servicio será responsable de:
 - MFA avanzado.
 - Administración de permisos.
 
-Estas funciones pertenecen a otros Core Assets.
-
 ---
 
 # 4. Ubicación en la Arquitectura
@@ -379,7 +377,7 @@ Consume:
 POST /api/auth/login
 ```
 
-El backend Laravel traduce esta llamada a gRPC usando `eliza.v1.ElizaService/Login` para compatibilidad actual.
+El backend Laravel traduce esta llamada a gRPC usando `auth.v1.AuthService/Login`.
 
 ---
 

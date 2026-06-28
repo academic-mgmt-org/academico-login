@@ -1,4 +1,3 @@
-import { ElizaService } from './gen/proto/eliza_pb.js';
 import { AuthService as AuthRpcService } from './gen/proto/auth_pb.js';
 import { AuthService as AuthDomainService } from './auth/auth.service.js';
 import { ConnectError, Code } from '@connectrpc/connect';
@@ -51,32 +50,6 @@ function toLoginResponse(result) {
  */
 export default (router, app, registerServerReflectionFromUint8Array) => {
   const authService = app.get(AuthDomainService);
-
-  router.service(ElizaService, {
-    async say(req) {
-      return {
-        sentence: `You said: "${req.sentence}"`,
-      };
-    },
-
-    async login(req) {
-      try {
-        const result = await authService.login({
-          username: req.username,
-          password: req.password,
-          appVersion: req.appVersion,
-        });
-        return {
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-          mfaRequired: result.mfaRequired,
-          requiresAppUpdate: result.requiresAppUpdate,
-        };
-      } catch (err) {
-        throw toConnectError(err);
-      }
-    },
-  });
 
   router.service(AuthRpcService, {
     async login(req) {

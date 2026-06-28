@@ -3,6 +3,10 @@ FROM node:22.13.0-slim AS builder
 
 WORKDIR /usr/src/app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 
 RUN npm install --legacy-peer-deps

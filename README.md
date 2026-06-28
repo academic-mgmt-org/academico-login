@@ -19,9 +19,7 @@ Este servicio es el Core Asset de autenticacion para el flujo usado por
 - Registra sesiones en `academico.auth_sessions` cuando la migracion del asset
   fue aplicada.
 
-El contrato legacy `eliza.v1.ElizaService/Login` se conserva para el cliente web
-Laravel actualmente desplegado. El contrato reutilizable del asset es
-`auth.v1.AuthService`.
+El contrato reutilizable del asset es `auth.v1.AuthService`.
 
 ## Documentacion transversal
 
@@ -80,7 +78,6 @@ ConnectRPC/gRPC:
 - `auth.v1.AuthService/RefreshToken`
 - `auth.v1.AuthService/ValidateToken`
 - `auth.v1.AuthService/Logout`
-- `eliza.v1.ElizaService/Login` (compatibilidad)
 
 ## Ejecucion local
 
