@@ -28,6 +28,7 @@ variables:
   prodSshUser: 'azureuser'
   prodRemoteAppPath: '/home/azureuser/academico-login'
   prodComposeFile: 'docker-compose.yml'
+  servicePort: '3001'
 
 stages:
 - stage: Build
@@ -78,7 +79,7 @@ stages:
           fi
         }
 
-        for name in LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
+        for name in DEFAULT_SERVICE_PORT LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
           require_env "$name"
         done
 
@@ -99,14 +100,18 @@ stages:
 
         echo "Reading development service port..."
         ENV_FILE="$REMOTE_APP_PATH/.env"
-        if [ ! -f "$ENV_FILE" ]; then
-          echo "Missing $ENV_FILE. Create it with PORT=<service-port> before deploying."
-          exit 1
+        SERVICE_PORT=""
+        if [ -f "$ENV_FILE" ]; then
+          SERVICE_PORT="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)"
         fi
 
-        SERVICE_PORT="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)"
+        if [ -z "$SERVICE_PORT" ]; then
+          echo "No PORT found in $ENV_FILE. Using pipeline default port $DEFAULT_SERVICE_PORT."
+          SERVICE_PORT="$DEFAULT_SERVICE_PORT"
+        fi
+
         if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
-          echo "Invalid PORT value in $ENV_FILE: $SERVICE_PORT"
+          echo "Invalid PORT value resolved for development: $SERVICE_PORT"
           exit 1
         fi
 
@@ -173,6 +178,7 @@ stages:
         REMOTE_APP_PATH: $(devRemoteAppPath)
         DEV_COMPOSE_FILE: $(devComposeFile)
         COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/$(devComposeFile)
+        DEFAULT_SERVICE_PORT: $(servicePort)
         LOGIN_API_KEY: $(LOGIN_API_KEY)
         JWT_SECRET: $(JWT_SECRET)
         JWT_DOC_SECRET: $(JWT_DOC_SECRET)
@@ -231,7 +237,7 @@ stages:
           fi
         }
 
-        for name in PROD_SSH_PRIVATE_KEY_B64 LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
+        for name in DEFAULT_SERVICE_PORT PROD_SSH_PRIVATE_KEY_B64 LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
           require_env "$name"
         done
 
@@ -275,11 +281,11 @@ stages:
         echo "Reading production service port..."
         SERVICE_PORT="$(
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
-            "set -eu; ENV_FILE='$REMOTE_APP_PATH/.env'; if [ ! -f \"\$ENV_FILE\" ]; then echo \"Missing \$ENV_FILE\" >&2; exit 1; fi; sed -n 's/^PORT=//p' \"\$ENV_FILE\" | tail -n 1"
+            "set -eu; ENV_FILE='$REMOTE_APP_PATH/.env'; SERVICE_PORT=''; if [ -f \"\$ENV_FILE\" ]; then SERVICE_PORT=\$(sed -n 's/^PORT=//p' \"\$ENV_FILE\" | tail -n 1); fi; if [ -z \"\$SERVICE_PORT\" ]; then echo \"No PORT found in \$ENV_FILE. Using pipeline default port $DEFAULT_SERVICE_PORT.\" >&2; SERVICE_PORT='$DEFAULT_SERVICE_PORT'; fi; printf '%s\n' \"\$SERVICE_PORT\""
         )"
 
         if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
-          echo "Invalid PORT value in $REMOTE_APP_PATH/.env: $SERVICE_PORT"
+          echo "Invalid PORT value resolved for production: $SERVICE_PORT"
           exit 1
         fi
 
@@ -354,6 +360,7 @@ stages:
         PROD_COMPOSE_FILE: $(prodComposeFile)
         COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/$(prodComposeFile)
         PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
+        DEFAULT_SERVICE_PORT: $(servicePort)
         LOGIN_API_KEY: $(LOGIN_API_KEY)
         JWT_SECRET: $(JWT_SECRET)
         JWT_DOC_SECRET: $(JWT_DOC_SECRET)

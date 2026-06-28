@@ -77,6 +77,10 @@ parameters:
   type: string
   default: 'docker-compose.yml'
 
+- name: servicePort
+  type: string
+  default: ''
+
 # Name of the .env key used by docker compose for the pushed image.
 # The compose file must reference this variable in its image property.
 - name: imageEnvVariableName
@@ -84,9 +88,9 @@ parameters:
   default: 'SERVICE_IMAGE'
 
 # Space-separated list, in the order to write into the remote .env file.
-# PORT and the image variable are intentionally omitted: PORT is read from
-# ${devRemoteAppPath}/.env or ${prodRemoteAppPath}/.env and preserved, while the
-# image variable is generated from the current Build.BuildId.
+# PORT and the image variable are intentionally omitted: PORT is read from the
+# existing remote .env when present, or from servicePort on first deployment,
+# while the image variable is generated from the current Build.BuildId.
 - name: envVariableNames
   type: string
   default: 'NODE_ENV SERVICE_API_KEY DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD'
@@ -206,14 +210,22 @@ stages:
 
         echo "Reading development service port..."
         ENV_FILE="$REMOTE_APP_PATH/.env"
-        if [ ! -f "$ENV_FILE" ]; then
-          echo "Missing $ENV_FILE. Create it with PORT=<service-port> before deploying."
-          exit 1
+        SERVICE_PORT=""
+        if [ -f "$ENV_FILE" ]; then
+          SERVICE_PORT="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)"
         fi
 
-        SERVICE_PORT="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)"
+        if [ -z "$SERVICE_PORT" ]; then
+          if [ -z "${DEFAULT_SERVICE_PORT:-}" ]; then
+            echo "No PORT found in $ENV_FILE and servicePort was not configured."
+            exit 1
+          fi
+          echo "No PORT found in $ENV_FILE. Using configured servicePort $DEFAULT_SERVICE_PORT."
+          SERVICE_PORT="$DEFAULT_SERVICE_PORT"
+        fi
+
         if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
-          echo "Invalid PORT value in $ENV_FILE: $SERVICE_PORT"
+          echo "Invalid PORT value resolved for development: $SERVICE_PORT"
           exit 1
         fi
 
@@ -274,6 +286,7 @@ stages:
         COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/${{ parameters.devComposeFile }}
         IMAGE_ENV_VARIABLE_NAME: ${{ parameters.imageEnvVariableName }}
         ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
+        DEFAULT_SERVICE_PORT: ${{ parameters.servicePort }}
         ${{ each envVar in parameters.envVariables }}:
           ${{ envVar.key }}: ${{ envVar.value }}
 
@@ -380,11 +393,11 @@ stages:
         echo "Reading production service port..."
         SERVICE_PORT="$(
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
-            "set -eu; ENV_FILE='$REMOTE_APP_PATH/.env'; if [ ! -f \"\$ENV_FILE\" ]; then echo \"Missing \$ENV_FILE\" >&2; exit 1; fi; sed -n 's/^PORT=//p' \"\$ENV_FILE\" | tail -n 1"
+            "set -eu; ENV_FILE='$REMOTE_APP_PATH/.env'; DEFAULT_SERVICE_PORT='$DEFAULT_SERVICE_PORT'; SERVICE_PORT=''; if [ -f \"\$ENV_FILE\" ]; then SERVICE_PORT=\$(sed -n 's/^PORT=//p' \"\$ENV_FILE\" | tail -n 1); fi; if [ -z \"\$SERVICE_PORT\" ]; then if [ -z \"\$DEFAULT_SERVICE_PORT\" ]; then echo \"No PORT found in \$ENV_FILE and servicePort was not configured.\" >&2; exit 1; fi; echo \"No PORT found in \$ENV_FILE. Using configured servicePort \$DEFAULT_SERVICE_PORT.\" >&2; SERVICE_PORT=\"\$DEFAULT_SERVICE_PORT\"; fi; printf '%s\n' \"\$SERVICE_PORT\""
         )"
 
         if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
-          echo "Invalid PORT value in $REMOTE_APP_PATH/.env: $SERVICE_PORT"
+          echo "Invalid PORT value resolved for production: $SERVICE_PORT"
           exit 1
         fi
 
@@ -452,6 +465,7 @@ stages:
         COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/${{ parameters.prodComposeFile }}
         IMAGE_ENV_VARIABLE_NAME: ${{ parameters.imageEnvVariableName }}
         ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
+        DEFAULT_SERVICE_PORT: ${{ parameters.servicePort }}
         PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
         ${{ each envVar in parameters.envVariables }}:
           ${{ envVar.key }}: ${{ envVar.value }}
