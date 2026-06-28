@@ -2,44 +2,41 @@
 
 Este documento contiene primero los comandos usados para validar localmente la integracion entre:
 
-- base de datos PostgreSQL levantada desde `/home/azureuser/academico-esquema-bd`;
-- servicio `academico-login` levantado desde `/home/azureuser/academico-login`;
+- base de datos PostgreSQL local;
+- servicio `academico-login` local;
 - Docker Compose en ambos repositorios;
 - conexion SSL entre login y PostgreSQL;
 - endpoints REST principales del servicio de login.
 
+Repositorios usados:
+
+- `academico-login`: `https://github.com/academic-mgmt-org/academico-login.git`
+- `academico-esquema-bd`: `https://dev.azure.com/fabrica-utn/academico-estudiantes/_git/academico-esquema-bd`
+
+Los comandos asumen que ambos repositorios fueron clonados en el mismo directorio padre:
+
+```bash
+git clone https://github.com/academic-mgmt-org/academico-login.git
+git clone https://dev.azure.com/fabrica-utn/academico-estudiantes/_git/academico-esquema-bd
+```
+
 ## 1. Comandos exactos usados en la prueba local
 
-### 1.1. Guardar el `.env` original del login
+### 1.1. Crear el `.env` local del login
+
+En un clon limpio normalmente no existe `.env`. Si ya existe un `.env` local con valores propios, respaldarlo antes de sobrescribirlo:
 
 ```bash
-cd /home/azureuser/academico-login
-cp -p .env /tmp/academico-login.env.before-local-test
+cd academico-login
+if [ -f .env ]; then
+  cp -p .env /tmp/academico-login.env.before-local-test
+fi
 ```
 
-### 1.2. Configurar temporalmente el `.env` local del login
-
-Durante la prueba se reemplazo temporalmente `/home/azureuser/academico-login/.env` por estos valores:
-
-```env
-PORT=3001
-NODE_ENV=production
-LOGIN_API_KEY=local-login-api-key
-JWT_SECRET=local-jwt-secret
-JWT_DOC_SECRET=local-jwt-secret
-JWT_ACCESS_TTL=2h
-JWT_REFRESH_TTL=7d
-DB_HOST=academic-postgres-db
-DB_PORT=5432
-DB_DATABASE=academic_management_db
-DB_USER=academic_user
-DB_PASSWORD=academic_password
-```
-
-Comando equivalente para escribir ese archivo:
+Crear el `.env` local para la prueba:
 
 ```bash
-cd /home/azureuser/academico-login
+cd academico-login
 cat > .env <<'EOF'
 PORT=3001
 NODE_ENV=production
@@ -56,17 +53,17 @@ DB_PASSWORD=academic_password
 EOF
 ```
 
-### 1.3. Levantar la base local desde `academico-esquema-bd`
+### 1.2. Levantar la base local desde `academico-esquema-bd`
 
 ```bash
-cd /home/azureuser/academico-esquema-bd
+cd academico-esquema-bd
 docker compose up -d --build
 ```
 
-### 1.4. Verificar que PostgreSQL tenga SSL activo
+### 1.3. Verificar que PostgreSQL tenga SSL activo
 
 ```bash
-cd /home/azureuser/academico-esquema-bd
+cd academico-esquema-bd
 
 set -e
 for i in $(seq 1 60); do
@@ -90,14 +87,14 @@ Resultado esperado:
 on
 ```
 
-### 1.5. Aplicar migraciones `V2` en adelante del esquema academico
+### 1.4. Aplicar migraciones `V2` en adelante del esquema academico
 
 Este paso deja `academico.usuarios` y `academico.roles` con las columnas esperadas por `academico-login`.
 
 Advertencia: `V2__simplificar_esquema.sql` elimina y recrea tablas. Usar solo en base local de pruebas o en una base que se pueda reinicializar.
 
 ```bash
-cd /home/azureuser/academico-esquema-bd
+cd academico-esquema-bd
 
 docker run --rm \
   --network academico-esquema-bd_default \
@@ -122,16 +119,16 @@ docker run --rm \
   '
 ```
 
-### 1.6. Si el contenedor de base desaparece, recrearlo
+### 1.5. Si el contenedor de base desaparece, recrearlo
 
 Durante la prueba el volumen quedo disponible, pero el contenedor no estaba presente al validar. Se recreo con:
 
 ```bash
-cd /home/azureuser/academico-esquema-bd
+cd academico-esquema-bd
 docker compose up -d --build
 ```
 
-### 1.7. Verificar columnas y tablas requeridas por login
+### 1.6. Verificar columnas y tablas requeridas por login
 
 ```bash
 docker exec academic-postgres-db \
@@ -167,10 +164,10 @@ roles
 usuarios
 ```
 
-### 1.8. Ejecutar bootstrap del login contra la base local
+### 1.7. Ejecutar bootstrap del login contra la base local
 
 ```bash
-cd /home/azureuser/academico-login
+cd academico-login
 
 docker run --rm \
   --network academico-esquema-bd_default \
@@ -202,7 +199,7 @@ Usuarios de prueba creados:
 | `docente@demo.com` | `password123` | `docente` |
 | `administrador@demo.com` | `admin123` | `administrador` |
 
-### 1.9. Verificar bootstrap del login
+### 1.8. Verificar bootstrap del login
 
 ```bash
 docker exec academic-postgres-db \
@@ -234,10 +231,10 @@ docente@demo.com|docente|activo
 estudiante@demo.com|estudiante|activo
 ```
 
-### 1.10. Levantar `academico-login`
+### 1.9. Levantar `academico-login`
 
 ```bash
-cd /home/azureuser/academico-login
+cd academico-login
 docker compose up -d --build
 ```
 
@@ -245,14 +242,14 @@ Si existe un contenedor previo con el mismo nombre y Docker devuelve conflicto:
 
 ```bash
 docker rm -f academico-login
-cd /home/azureuser/academico-login
+cd academico-login
 docker compose up -d --build
 ```
 
-### 1.11. Conectar `academico-login` a la red de la base local
+### 1.10. Conectar `academico-login` a la red de la base local
 
 ```bash
-cd /home/azureuser/academico-login
+cd academico-login
 
 docker network connect academico-esquema-bd_default academico-login 2>/dev/null || true
 ```
@@ -282,7 +279,7 @@ Resultado esperado:
 academic-postgres-db
 ```
 
-### 1.12. Verificar logs de arranque del login
+### 1.11. Verificar logs de arranque del login
 
 ```bash
 docker logs --tail 80 academico-login
@@ -302,7 +299,7 @@ En la prueba se verifico que el servicio mapeara estas rutas:
 /api/v1/whitelist/all
 ```
 
-### 1.13. Probar endpoints REST con HTTP/2 h2c
+### 1.12. Probar endpoints REST con HTTP/2 h2c
 
 El servicio Fastify esta levantado con `http2: true`, por lo que las pruebas REST se hicieron con:
 
@@ -313,7 +310,7 @@ curl --http2-prior-knowledge
 Comando completo de validacion usado:
 
 ```bash
-cd /home/azureuser/academico-login
+cd academico-login
 
 set -euo pipefail
 BASE_URL=http://localhost:3001
@@ -479,15 +476,15 @@ PASS db_session                       estudiante@demo.com|revoked
 ALL_REST_ENDPOINT_CHECKS_PASSED
 ```
 
-### 1.14. Limpiar contenedores e imagenes creadas para la prueba
+### 1.13. Limpiar contenedores e imagenes creadas para la prueba
 
 ```bash
 set -e
 
-cd /home/azureuser/academico-login
+cd academico-login
 docker compose down
 
-cd /home/azureuser/academico-esquema-bd
+cd academico-esquema-bd
 docker compose down
 
 docker rmi academico-login:latest academico-postgres-ssl:15-alpine postgres:15-alpine || true
@@ -500,12 +497,16 @@ fi
 docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | sort
 ```
 
-### 1.15. Restaurar el `.env` original del login
+### 1.14. Restaurar o eliminar el `.env` local del login
 
 ```bash
-cd /home/azureuser/academico-login
-cp -p /tmp/academico-login.env.before-local-test .env
-rm -f /tmp/academico-login.env.before-local-test
+cd academico-login
+if [ -f /tmp/academico-login.env.before-local-test ]; then
+  cp -p /tmp/academico-login.env.before-local-test .env
+  rm -f /tmp/academico-login.env.before-local-test
+else
+  rm -f .env
+fi
 ```
 
 ## 2. Ajustes necesarios encontrados durante la prueba
@@ -526,15 +527,15 @@ Eso es estilo Express. En Fastify corresponde usar:
 response.code(status).send(errorResponse);
 ```
 
-Se ajusto [src/filters/http-exception.filter.js](/home/azureuser/academico-login/src/filters/http-exception.filter.js) para soportar ambos casos.
+Se ajusto `src/filters/http-exception.filter.js` en `https://github.com/academic-mgmt-org/academico-login.git` para soportar ambos casos.
 
 ### 2.2. Bootstrap compatible con `academico-esquema-bd`
 
-El script [database/scripts/bootstrap_login_schema.sql](/home/azureuser/academico-login/database/scripts/bootstrap_login_schema.sql) usaba `updated_at` en el `ON CONFLICT`. El esquema simplificado de `academico-esquema-bd` usa `actualizado_en`, por lo que se elimino esa asignacion del conflicto para hacerlo compatible.
+El script `database/scripts/bootstrap_login_schema.sql` en `https://github.com/academic-mgmt-org/academico-login.git` usaba `updated_at` en el `ON CONFLICT`. El esquema simplificado de `academico-esquema-bd` usa `actualizado_en`, por lo que se elimino esa asignacion del conflicto para hacerlo compatible.
 
 ## 3. Valores locales usados en `.env`
 
-Cuando `academico-login` corre dentro de Docker y la base viene de `/home/azureuser/academico-esquema-bd`, usar:
+Cuando `academico-login` corre dentro de Docker y la base viene del repositorio `https://dev.azure.com/fabrica-utn/academico-estudiantes/_git/academico-esquema-bd`, usar:
 
 ```env
 PORT=3001
@@ -558,8 +559,7 @@ Si `academico-login` corre directamente en el host, `DB_HOST` debe ser `localhos
 Esta es la version corta del flujo completo.
 
 ```bash
-cd /home/azureuser/academico-login
-cp -p .env /tmp/academico-login.env.before-local-test
+cd academico-login
 cat > .env <<'EOF'
 PORT=3001
 NODE_ENV=production
@@ -575,7 +575,7 @@ DB_USER=academic_user
 DB_PASSWORD=academic_password
 EOF
 
-cd /home/azureuser/academico-esquema-bd
+cd academico-esquema-bd
 docker compose up -d --build
 
 docker run --rm \
@@ -594,7 +594,7 @@ docker run --rm \
     done
   '
 
-cd /home/azureuser/academico-login
+cd academico-login
 docker run --rm \
   --network academico-esquema-bd_default \
   -v "$PWD":/work \
@@ -623,15 +623,14 @@ curl --http2-prior-knowledge -X POST http://localhost:3001/api/v1/auth/login \
 Limpiar:
 
 ```bash
-cd /home/azureuser/academico-login
+cd academico-login
 docker compose down
 
-cd /home/azureuser/academico-esquema-bd
+cd academico-esquema-bd
 docker compose down
 
 docker rmi academico-login:latest academico-postgres-ssl:15-alpine postgres:15-alpine || true
 
-cd /home/azureuser/academico-login
-cp -p /tmp/academico-login.env.before-local-test .env
-rm -f /tmp/academico-login.env.before-local-test
+cd academico-login
+rm -f .env
 ```
