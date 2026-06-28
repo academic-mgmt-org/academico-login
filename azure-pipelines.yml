@@ -20,6 +20,10 @@ variables:
 
   # Container name on your personal server
   containerName: 'academico-login'
+  devAgentPool: 'Default'
+  devAgentName: 'self-hosted-agent'
+  devRemoteAppPath: '/home/azureuser/academico-login'
+  devComposeFile: 'docker-compose.pipeline.yml'
   prodSshHost: '20.115.132.131'
   prodSshUser: 'azureuser'
   prodRemoteAppPath: '/home/azureuser/academico-login'
@@ -45,9 +49,152 @@ stages:
           $(tag)
         addPipelineData: false
 
+- stage: DeployDevelopment
+  displayName: Deploy to development
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: DeployDevelopment
+    displayName: Deploy Docker Compose on development server
+    pool:
+      name: $(devAgentPool)
+      demands:
+      - Agent.Name -equals $(devAgentName)
+    steps:
+    - task: Docker@2
+      displayName: Login to Azure Container Registry
+      inputs:
+        command: login
+        containerRegistry: $(dockerRegistryServiceConnection)
+
+    - script: |
+        set -euo pipefail
+
+        require_env() {
+          local name="$1"
+          if [ -z "${!name:-}" ]; then
+            echo "Missing required environment variable: $name"
+            exit 1
+          fi
+        }
+
+        for name in LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
+          require_env "$name"
+        done
+
+        IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
+        ENV_FILE_LOCAL="$(mktemp)"
+        COMPOSE_FILE_LOCAL="$(mktemp)"
+
+        cleanup() {
+          rm -f "$ENV_FILE_LOCAL" "$COMPOSE_FILE_LOCAL"
+        }
+        trap cleanup EXIT
+
+        mkdir -p "$REMOTE_APP_PATH"
+
+        echo "Reading development service port..."
+        ENV_FILE="$REMOTE_APP_PATH/.env"
+        if [ ! -f "$ENV_FILE" ]; then
+          echo "Missing $ENV_FILE. Create it with PORT=<service-port> before deploying."
+          exit 1
+        fi
+
+        SERVICE_PORT="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)"
+        if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
+          echo "Invalid PORT value in $ENV_FILE: $SERVICE_PORT"
+          exit 1
+        fi
+
+        umask 077
+        {
+          printf 'PORT=%s\n' "$SERVICE_PORT"
+          printf 'NODE_ENV=production\n'
+          printf 'LOGIN_API_KEY=%s\n' "$LOGIN_API_KEY"
+          printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
+          printf 'JWT_DOC_SECRET=%s\n' "$JWT_DOC_SECRET"
+          printf 'JWT_ACCESS_TTL=%s\n' "$JWT_ACCESS_TTL"
+          printf 'JWT_REFRESH_TTL=%s\n' "$JWT_REFRESH_TTL"
+          printf 'DB_HOST=%s\n' "$DB_HOST"
+          printf 'DB_PORT=%s\n' "$DB_PORT"
+          printf 'DB_DATABASE=%s\n' "$DB_DATABASE"
+          printf 'DB_USER=%s\n' "$DB_USER"
+          printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
+        } > "$ENV_FILE_LOCAL"
+
+        cat > "$COMPOSE_FILE_LOCAL" << EOF
+        services:
+          academico-login:
+            image: ${IMAGE}
+            container_name: ${CONTAINER_NAME}
+            restart: always
+            ports:
+              - "${SERVICE_PORT}:${SERVICE_PORT}"
+            env_file:
+              - .env
+            environment:
+              - NODE_ENV=production
+        EOF
+
+        echo "Updating development .env and compose file..."
+        mv "$ENV_FILE_LOCAL" "$REMOTE_APP_PATH/.env.pipeline"
+        mv "$REMOTE_APP_PATH/.env.pipeline" "$REMOTE_APP_PATH/.env"
+        chmod 600 "$REMOTE_APP_PATH/.env"
+        cp "$COMPOSE_FILE_LOCAL" "$REMOTE_APP_PATH/$DEV_COMPOSE_FILE"
+
+        cd "$REMOTE_APP_PATH"
+
+        if [ -f docker-compose.yml ]; then
+          echo "Stopping current compose project..."
+          docker compose -f docker-compose.yml down --remove-orphans || true
+        fi
+
+        echo "Stopping previous pipeline compose project..."
+        docker compose -f "$DEV_COMPOSE_FILE" down --remove-orphans || true
+
+        echo "Pulling development image..."
+        docker compose -f "$DEV_COMPOSE_FILE" pull
+
+        echo "Starting development compose project..."
+        docker compose -f "$DEV_COMPOSE_FILE" up -d --remove-orphans
+
+        echo "Verifying container is running..."
+        sleep 8
+        if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+          echo "Container $CONTAINER_NAME did not stay running."
+          docker ps -a --filter "name=^/${CONTAINER_NAME}$"
+          docker logs --tail 200 "$CONTAINER_NAME" || true
+          exit 1
+        fi
+
+        docker compose -f "$DEV_COMPOSE_FILE" ps
+
+        echo "Cleaning up dangling images..."
+        docker image prune -f
+
+        echo "Development deployment completed."
+      displayName: Deploy academico-login to development
+      env:
+        CONTAINER_REGISTRY: $(containerRegistry)
+        IMAGE_REPOSITORY: $(imageRepository)
+        TAG: $(tag)
+        CONTAINER_NAME: $(containerName)
+        REMOTE_APP_PATH: $(devRemoteAppPath)
+        DEV_COMPOSE_FILE: $(devComposeFile)
+        LOGIN_API_KEY: $(LOGIN_API_KEY)
+        JWT_SECRET: $(JWT_SECRET)
+        JWT_DOC_SECRET: $(JWT_DOC_SECRET)
+        JWT_ACCESS_TTL: $(JWT_ACCESS_TTL)
+        JWT_REFRESH_TTL: $(JWT_REFRESH_TTL)
+        DB_HOST: $(DB_HOST)
+        DB_PORT: $(DB_PORT)
+        DB_DATABASE: $(DB_DATABASE)
+        DB_USER: $(DB_USER)
+        DB_PASSWORD: $(DB_PASSWORD)
+
 - stage: ApproveProduction
   displayName: Approve production deployment
-  dependsOn: Build
+  dependsOn: DeployDevelopment
   condition: succeeded()
   jobs:
   - job: WaitForProductionApproval
@@ -92,7 +239,7 @@ stages:
           fi
         }
 
-        for name in PROD_SSH_PRIVATE_KEY_B64 LOGIN_API_KEY DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
+        for name in PROD_SSH_PRIVATE_KEY_B64 LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD; do
           require_env "$name"
         done
 
@@ -145,6 +292,10 @@ stages:
           printf 'PORT=%s\n' "$SERVICE_PORT"
           printf 'NODE_ENV=production\n'
           printf 'LOGIN_API_KEY=%s\n' "$LOGIN_API_KEY"
+          printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
+          printf 'JWT_DOC_SECRET=%s\n' "$JWT_DOC_SECRET"
+          printf 'JWT_ACCESS_TTL=%s\n' "$JWT_ACCESS_TTL"
+          printf 'JWT_REFRESH_TTL=%s\n' "$JWT_REFRESH_TTL"
           printf 'DB_HOST=%s\n' "$DB_HOST"
           printf 'DB_PORT=%s\n' "$DB_PORT"
           printf 'DB_DATABASE=%s\n' "$DB_DATABASE"
@@ -220,6 +371,10 @@ stages:
         PROD_COMPOSE_FILE: $(prodComposeFile)
         PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
         LOGIN_API_KEY: $(LOGIN_API_KEY)
+        JWT_SECRET: $(JWT_SECRET)
+        JWT_DOC_SECRET: $(JWT_DOC_SECRET)
+        JWT_ACCESS_TTL: $(JWT_ACCESS_TTL)
+        JWT_REFRESH_TTL: $(JWT_REFRESH_TTL)
         DB_HOST: $(DB_HOST)
         DB_PORT: $(DB_PORT)
         DB_DATABASE: $(DB_DATABASE)
