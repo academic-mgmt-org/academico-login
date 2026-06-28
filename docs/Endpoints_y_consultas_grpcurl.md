@@ -20,41 +20,14 @@ LOGIN_HOST=localhost:3001
 LOGIN_API_KEY=<valor_de_LOGIN_API_KEY>
 ```
 
-El servicio usa Fastify con HTTP/2 h2c. Para REST, usar
-`curl --http2-prior-knowledge`. Para gRPC/Connect, usar `grpcurl -plaintext`.
+El servicio usa Fastify con HTTP/2 h2c y publica endpoints gRPC/Connect.
+Para consultar con `grpcurl`, usar `grpcurl -plaintext`.
 
 ## Seguridad
 
-- Los endpoints REST requieren `x-api-key: $LOGIN_API_KEY`, excepto
-  `/api/health`, `/api/ready` y `/api/live`.
 - Los RPCs de negocio requieren `x-api-key: $LOGIN_API_KEY`.
 - La reflexion gRPC permite `grpcurl list` y `grpcurl describe` sin API key.
-- Los tokens de usuario se envian como `Bearer <accessToken>` solo en REST
-  cuando el endpoint lo requiere; en gRPC los tokens van en el mensaje.
-
-## Endpoints REST
-
-| Metodo | Endpoint | Requiere API key | Entrada | Salida principal |
-| --- | --- | --- | --- | --- |
-| `GET` | `/api/health` | No | Sin body | `status`, `service`, `timestamp`, `uptime` |
-| `GET` | `/api/ready` | No | Sin body | `ready`, `timestamp` |
-| `GET` | `/api/live` | No | Sin body | `alive`, `timestamp`, `uptime` |
-| `POST` | `/api/v1/auth/login` | Si | `username`, `password`, opcional `appVersion`/`app_version`, `passwordEncoding`/`password_encoding` | `accessToken`, `refreshToken`, `tokenType`, `expiresIn`, `sessionId`, `mfaRequired`, `requiresAppUpdate` |
-| `POST` | `/api/v1/auth/refresh` | Si | `refreshToken` o `refresh_token` | Nueva respuesta de login con el mismo `refreshToken` y `sessionId` |
-| `POST` | `/api/v1/auth/logout` | Si | `token`, `refreshToken`/`refresh_token` o header `Authorization: Bearer <token>` | `success`, `revoked`, `message` |
-| `POST` | `/api/v1/auth/validate-token` | Si | `token` | `isValid` |
-| `POST` | `/api/v1/auth/validate-token-2` | Si | Header `Authorization: Bearer <accessToken>` | `isValid`, `identifier`, `email`, `sessionId`, `userId`, `role`, `applications` |
-| `GET` | `/api/v1/whitelist/all` | Si | Sin body | Lista de rutas publicas para gateway |
-
-Ejemplo REST de login:
-
-```bash
-curl --http2-prior-knowledge -sS \
-  -X POST "http://${LOGIN_HOST}/api/v1/auth/login" \
-  -H "content-type: application/json" \
-  -H "x-api-key: ${LOGIN_API_KEY}" \
-  -d '{"username":"estudiante@utn.edu.ec","password":"cGFzc3dvcmQxMjM=","passwordEncoding":"base64"}'
-```
+- Los tokens de usuario se envian en el mensaje gRPC correspondiente.
 
 ## Endpoints gRPC/Connect
 
@@ -307,8 +280,6 @@ grpcurl -plaintext \
 - `grpcurl` imprime respuestas con nombres JSON camelCase, por ejemplo
   `accessToken`, `refreshToken`, `sessionId`, aunque el `.proto` declare
   `access_token`, `refresh_token` y `session_id`.
-- En REST, los DTOs aceptan aliases `camelCase` y `snake_case` para
-  `passwordEncoding`, `appVersion` y `refreshToken`.
 - Si se ejecuta contra un gateway publico que transforma nombres de campos,
   puede requerirse `passwordEncoding`/`refreshToken` en lugar de
   `password_encoding`/`refresh_token`.
