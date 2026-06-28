@@ -3,9 +3,22 @@
 # Usage:
 # 1. Copy this file to azure-pipelines.yml in the target microservice.
 # 2. Adjust the parameters below for the service name, image repository,
-#    ports, remote path and environment variables.
+#    compose file, paths, ports and environment variables.
 # 3. Create the referenced secret variables in Azure DevOps before running
-#    the pipeline. Example: DB_PASSWORD, LOGIN_API_KEY, etc.
+#    the pipeline. Example: DB_PASSWORD, NOTIFICACIONES_API_KEY, JWT_SECRET.
+#
+# Runtime model:
+# - Build runs on an Azure hosted agent and pushes the image to ACR.
+# - Development deploys automatically on this VM through the self-hosted agent.
+# - Production waits for ManualValidation and then deploys over SSH.
+#
+# Compose requirement:
+# - The compose file must exist in the repo, usually docker-compose.pipeline.yml.
+# - Its image line should reference the configured imageEnvVariableName. Example:
+#     image: ${SERVICE_IMAGE}
+# - For single-port services, use PORT from .env. Example:
+#     ports:
+#       - "${PORT}:${PORT}"
 
 parameters:
 - name: dockerRegistryServiceConnection
@@ -24,10 +37,6 @@ parameters:
   type: string
   default: 'academico-microservicio'
 
-- name: remoteAppPath
-  type: string
-  default: '/home/azureuser/academico-microservicio'
-
 - name: dockerfilePath
   type: string
   default: '$(Build.SourcesDirectory)/Dockerfile'
@@ -36,40 +45,54 @@ parameters:
   type: string
   default: 'ubuntu-latest'
 
-- name: environmentName
+- name: devAgentPool
   type: string
-  default: 'servidor-gateway'
+  default: 'Default'
 
-# Optional space-separated host:container mappings. Examples:
-# - Gateway HTTP + gRPC: '3000:3000 50050:50050'
-#
-# Leave empty for single-port microservices. In that case, the deploy step
-# reads PORT from ${remoteAppPath}/.env and publishes PORT:PORT. For example,
-# academico-login reads /home/azureuser/academico-login/.env.
-- name: publishedPorts
+- name: devAgentName
   type: string
-  default: ''
+  default: 'self-hosted-agent'
 
-# Optional old container names to remove during migration/rename.
-- name: legacyContainerNames
+- name: devRemoteAppPath
   type: string
-  default: ''
+  default: '/home/azureuser/academico-microservicio'
 
-# Optional hard override passed to docker run. Keep production for Nest/Pino
-# images that install only production dependencies.
-- name: nodeEnv
+- name: prodSshHost
   type: string
-  default: 'production'
+  default: '20.115.132.131'
+
+- name: prodSshUser
+  type: string
+  default: 'azureuser'
+
+- name: prodRemoteAppPath
+  type: string
+  default: '/home/azureuser/academico-microservicio'
+
+- name: devComposeFile
+  type: string
+  default: 'docker-compose.pipeline.yml'
+
+- name: prodComposeFile
+  type: string
+  default: 'docker-compose.pipeline.yml'
+
+# Name of the .env key used by docker compose for the pushed image.
+# The compose file must reference this variable in its image property.
+- name: imageEnvVariableName
+  type: string
+  default: 'SERVICE_IMAGE'
 
 # Space-separated list, in the order to write into the remote .env file.
-# PORT is intentionally omitted here: it is read from ${remoteAppPath}/.env
-# and preserved when the file is regenerated during deploy.
+# PORT and the image variable are intentionally omitted: PORT is read from
+# ${devRemoteAppPath}/.env or ${prodRemoteAppPath}/.env and preserved, while the
+# image variable is generated from the current Build.BuildId.
 - name: envVariableNames
   type: string
   default: 'NODE_ENV SERVICE_API_KEY DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD'
 
-# Values injected into the .env creation step. Use Azure DevOps secret
-# variables for sensitive values and plain literals for non-sensitive values.
+# Values injected into the .env creation step. Use Azure DevOps secret variables
+# for sensitive values and plain literals for non-sensitive values.
 - name: envVariables
   type: object
   default:
@@ -80,6 +103,18 @@ parameters:
     DB_DATABASE: '$(DB_DATABASE)'
     DB_USER: '$(DB_USER)'
     DB_PASSWORD: '$(DB_PASSWORD)'
+
+- name: productionApprovalNotifyUsers
+  type: string
+  default: 'gacalderonr@utn.edu.ec'
+
+- name: productionApprovers
+  type: string
+  default: 'gacalderonr@utn.edu.ec'
+
+- name: productionApprovalInstructions
+  type: string
+  default: 'Approve to deploy this microservice to production.'
 
 trigger:
 - main
@@ -110,144 +145,313 @@ stages:
           $(tag)
         addPipelineData: false
 
-- stage: Deploy
-  displayName: Deploy to personal server
+- stage: DeployDevelopment
+  displayName: Deploy to development
   dependsOn: Build
   condition: succeeded()
   jobs:
-  - deployment: DeployToPersonalServer
-    displayName: Deploy Docker container
-    environment:
-      name: ${{ parameters.environmentName }}
-      resourceType: virtualMachine
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: Docker@2
-            displayName: Login to Azure Container Registry
-            inputs:
-              command: login
-              containerRegistry: ${{ parameters.dockerRegistryServiceConnection }}
+  - job: DeployDevelopment
+    displayName: Deploy Docker Compose on development server
+    pool:
+      name: ${{ parameters.devAgentPool }}
+      demands:
+      - Agent.Name -equals ${{ parameters.devAgentName }}
+    steps:
+    - task: Docker@2
+      displayName: Login to Azure Container Registry
+      inputs:
+        command: login
+        containerRegistry: ${{ parameters.dockerRegistryServiceConnection }}
 
-          - script: |
-              set -eu
+    - script: |
+        set -euo pipefail
 
-              echo "Creating environment folder and file..."
-              mkdir -p "$REMOTE_APP_PATH"
+        require_env() {
+          local name="$1"
+          if [ -z "${!name:-}" ]; then
+            echo "Missing required environment variable: $name"
+            exit 1
+          fi
+        }
 
-              ENV_FILE="$REMOTE_APP_PATH/.env"
-              if [ ! -f "$ENV_FILE" ]; then
-                echo "Missing $ENV_FILE. Create it with PORT=<service-port> before deploying."
-                exit 1
-              fi
+        validate_env_name() {
+          local name="$1"
+          if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "Invalid environment variable name: $name"
+            exit 1
+          fi
+        }
 
-              SERVICE_PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)
+        validate_env_name "$IMAGE_ENV_VARIABLE_NAME"
 
-              if [ -z "$SERVICE_PORT" ]; then
-                echo "Missing PORT in $ENV_FILE."
-                exit 1
-              fi
+        for name in $ENV_VARIABLE_NAMES; do
+          validate_env_name "$name"
+          require_env "$name"
+        done
 
-              case "$SERVICE_PORT" in
-                *[!0-9]*)
-                  echo "Invalid PORT value in $ENV_FILE: $SERVICE_PORT"
-                  exit 1
-                  ;;
-              esac
+        IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
+        ENV_FILE_LOCAL="$(mktemp)"
 
-              umask 077
-              printf 'PORT=%s\n' "$SERVICE_PORT" > "$ENV_FILE"
+        cleanup() {
+          rm -f "$ENV_FILE_LOCAL"
+        }
+        trap cleanup EXIT
 
-              for name in $ENV_VARIABLE_NAMES; do
-                if [ -z "${!name+x}" ]; then
-                  echo "Missing environment value for $name"
-                  exit 1
-                fi
-                printf '%s=%s\n' "$name" "${!name}" >> "$ENV_FILE"
-              done
+        if [ ! -f "$COMPOSE_SOURCE_FILE" ]; then
+          echo "Missing compose source file: $COMPOSE_SOURCE_FILE"
+          exit 1
+        fi
 
-              chmod 600 "$ENV_FILE"
-            displayName: 'Create .env file on personal server'
-            env:
-              REMOTE_APP_PATH: ${{ parameters.remoteAppPath }}
-              ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
-              ${{ each envVar in parameters.envVariables }}:
-                ${{ envVar.key }}: ${{ envVar.value }}
+        mkdir -p "$REMOTE_APP_PATH"
 
-          - script: |
-              set -eu
+        echo "Reading development service port..."
+        ENV_FILE="$REMOTE_APP_PATH/.env"
+        if [ ! -f "$ENV_FILE" ]; then
+          echo "Missing $ENV_FILE. Create it with PORT=<service-port> before deploying."
+          exit 1
+        fi
 
-              IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
-              ENV_FILE="${REMOTE_APP_PATH}/.env"
+        SERVICE_PORT="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)"
+        if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
+          echo "Invalid PORT value in $ENV_FILE: $SERVICE_PORT"
+          exit 1
+        fi
 
-              echo "Pulling image..."
-              docker pull "$IMAGE"
+        umask 077
+        {
+          printf '%s=%s\n' "$IMAGE_ENV_VARIABLE_NAME" "$IMAGE"
+          printf 'PORT=%s\n' "$SERVICE_PORT"
+          for name in $ENV_VARIABLE_NAMES; do
+            printf '%s=%s\n' "$name" "${!name}"
+          done
+        } > "$ENV_FILE_LOCAL"
 
-              echo "Stopping old container..."
-              docker rm -f "$CONTAINER_NAME" $LEGACY_CONTAINER_NAMES || true
+        echo "Updating development .env and compose file..."
+        mv "$ENV_FILE_LOCAL" "$REMOTE_APP_PATH/.env.pipeline"
+        mv "$REMOTE_APP_PATH/.env.pipeline" "$REMOTE_APP_PATH/.env"
+        chmod 600 "$REMOTE_APP_PATH/.env"
+        cp "$COMPOSE_SOURCE_FILE" "$REMOTE_APP_PATH/$DEV_COMPOSE_FILE"
 
-              RESOLVED_PUBLISHED_PORTS="$PUBLISHED_PORTS"
-              if [ -z "$RESOLVED_PUBLISHED_PORTS" ]; then
-                SERVICE_PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -n 1)
-                if [ -z "$SERVICE_PORT" ]; then
-                  echo "Missing PORT in $ENV_FILE and no publishedPorts parameter was provided."
-                  exit 1
-                fi
-                RESOLVED_PUBLISHED_PORTS="${SERVICE_PORT}:${SERVICE_PORT}"
-              fi
+        cd "$REMOTE_APP_PATH"
 
-              echo "Stopping any container using service ports..."
-              PORT_CONTAINERS=$(
-                for mapping in $RESOLVED_PUBLISHED_PORTS; do
-                  host_port="${mapping%%:*}"
-                  docker ps -q --filter "publish=${host_port}"
-                done | sort -u
-              )
+        if [ -f docker-compose.yml ]; then
+          echo "Stopping current compose project..."
+          docker compose -f docker-compose.yml down --remove-orphans || true
+        fi
 
-              if [ -n "$PORT_CONTAINERS" ]; then
-                docker rm -f $PORT_CONTAINERS
-              fi
+        echo "Stopping previous pipeline compose project..."
+        docker compose -f "$DEV_COMPOSE_FILE" down --remove-orphans || true
 
-              PUBLISH_ARGS=()
-              for mapping in $RESOLVED_PUBLISHED_PORTS; do
-                PUBLISH_ARGS+=("-p" "$mapping")
-              done
+        echo "Pulling development image..."
+        docker compose -f "$DEV_COMPOSE_FILE" pull
 
-              NODE_ENV_ARGS=()
-              if [ -n "$NODE_ENV_OVERRIDE" ]; then
-                NODE_ENV_ARGS=("-e" "NODE_ENV=${NODE_ENV_OVERRIDE}")
-              fi
+        echo "Starting development compose project..."
+        docker compose -f "$DEV_COMPOSE_FILE" up -d --remove-orphans
 
-              echo "Starting new container..."
-              docker run -d \
-                --name "$CONTAINER_NAME" \
-                --restart unless-stopped \
-                "${PUBLISH_ARGS[@]}" \
-                --env-file "$ENV_FILE" \
-                "${NODE_ENV_ARGS[@]}" \
-                "$IMAGE"
+        echo "Verifying container is running..."
+        sleep 8
+        if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+          echo "Container $CONTAINER_NAME did not stay running."
+          docker ps -a --filter "name=^/${CONTAINER_NAME}$"
+          docker logs --tail 200 "$CONTAINER_NAME" || true
+          exit 1
+        fi
 
-              echo "Verifying container is running..."
-              sleep 5
-              if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
-                echo "Container $CONTAINER_NAME did not stay running."
-                docker ps -a --filter "name=^/${CONTAINER_NAME}$"
-                docker logs --tail 200 "$CONTAINER_NAME" || true
-                exit 1
-              fi
+        docker compose -f "$DEV_COMPOSE_FILE" ps
 
-              echo "Cleaning up dangling images..."
-              docker image prune -f
+        echo "Cleaning up dangling images..."
+        docker image prune -f
 
-              echo "Deployment completed."
-            displayName: Run container on personal server
-            env:
-              CONTAINER_REGISTRY: ${{ parameters.containerRegistry }}
-              IMAGE_REPOSITORY: ${{ parameters.imageRepository }}
-              TAG: $(tag)
-              CONTAINER_NAME: ${{ parameters.containerName }}
-              LEGACY_CONTAINER_NAMES: ${{ parameters.legacyContainerNames }}
-              PUBLISHED_PORTS: ${{ parameters.publishedPorts }}
-              REMOTE_APP_PATH: ${{ parameters.remoteAppPath }}
-              NODE_ENV_OVERRIDE: ${{ parameters.nodeEnv }}
+        echo "Development deployment completed."
+      displayName: Deploy to development with Docker Compose
+      env:
+        CONTAINER_REGISTRY: ${{ parameters.containerRegistry }}
+        IMAGE_REPOSITORY: ${{ parameters.imageRepository }}
+        TAG: $(tag)
+        CONTAINER_NAME: ${{ parameters.containerName }}
+        REMOTE_APP_PATH: ${{ parameters.devRemoteAppPath }}
+        DEV_COMPOSE_FILE: ${{ parameters.devComposeFile }}
+        COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/${{ parameters.devComposeFile }}
+        IMAGE_ENV_VARIABLE_NAME: ${{ parameters.imageEnvVariableName }}
+        ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
+        ${{ each envVar in parameters.envVariables }}:
+          ${{ envVar.key }}: ${{ envVar.value }}
+
+- stage: ApproveProduction
+  displayName: Approve production deployment
+  dependsOn: DeployDevelopment
+  condition: succeeded()
+  jobs:
+  - job: WaitForProductionApproval
+    displayName: Await production approval
+    pool: server
+    timeoutInMinutes: 1440
+    steps:
+    - task: ManualValidation@1
+      displayName: Approve production deployment
+      timeoutInMinutes: 1440
+      inputs:
+        notifyUsers: ${{ parameters.productionApprovalNotifyUsers }}
+        approvers: ${{ parameters.productionApprovers }}
+        allowApproversToApproveTheirOwnRuns: true
+        instructions: ${{ parameters.productionApprovalInstructions }}
+        onTimeout: reject
+
+- stage: DeployProduction
+  displayName: Deploy to production
+  dependsOn: ApproveProduction
+  condition: succeeded()
+  jobs:
+  - job: DeployProduction
+    displayName: Deploy Docker Compose on production server
+    pool:
+      vmImage: ${{ parameters.vmImageName }}
+    steps:
+    - task: Docker@2
+      displayName: Login to Azure Container Registry
+      inputs:
+        command: login
+        containerRegistry: ${{ parameters.dockerRegistryServiceConnection }}
+
+    - script: |
+        set -euo pipefail
+
+        require_env() {
+          local name="$1"
+          if [ -z "${!name:-}" ]; then
+            echo "Missing required environment variable: $name"
+            exit 1
+          fi
+        }
+
+        validate_env_name() {
+          local name="$1"
+          if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "Invalid environment variable name: $name"
+            exit 1
+          fi
+        }
+
+        require_env PROD_SSH_PRIVATE_KEY_B64
+        validate_env_name "$IMAGE_ENV_VARIABLE_NAME"
+
+        for name in $ENV_VARIABLE_NAMES; do
+          validate_env_name "$name"
+          require_env "$name"
+        done
+
+        IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
+        SSH_DIR="$(mktemp -d)"
+        ENV_FILE_LOCAL="$(mktemp)"
+
+        cleanup() {
+          rm -rf "$SSH_DIR" "$ENV_FILE_LOCAL"
+        }
+        trap cleanup EXIT
+
+        if [ ! -f "$COMPOSE_SOURCE_FILE" ]; then
+          echo "Missing compose source file: $COMPOSE_SOURCE_FILE"
+          exit 1
+        fi
+
+        mkdir -p "$SSH_DIR"
+        chmod 700 "$SSH_DIR"
+        printf '%s' "$PROD_SSH_PRIVATE_KEY_B64" | base64 -d > "$SSH_DIR/key"
+        chmod 600 "$SSH_DIR/key"
+        ssh-keyscan -T 10 "$PROD_SSH_HOST" > "$SSH_DIR/known_hosts"
+
+        SSH_OPTS=(
+          -i "$SSH_DIR/key"
+          -o IdentitiesOnly=yes
+          -o UserKnownHostsFile="$SSH_DIR/known_hosts"
+          -o StrictHostKeyChecking=yes
+        )
+        REMOTE="${PROD_SSH_USER}@${PROD_SSH_HOST}"
+
+        DOCKER_CONFIG_FILE="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+        if [ ! -f "$DOCKER_CONFIG_FILE" ]; then
+          echo "Missing Docker config after ACR login: $DOCKER_CONFIG_FILE"
+          exit 1
+        fi
+
+        echo "Copying ACR Docker login to production server..."
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p ~/.docker && umask 077 && cat > ~/.docker/config.json" < "$DOCKER_CONFIG_FILE"
+
+        echo "Reading production service port..."
+        SERVICE_PORT="$(
+          ssh "${SSH_OPTS[@]}" "$REMOTE" \
+            "set -eu; ENV_FILE='$REMOTE_APP_PATH/.env'; if [ ! -f \"\$ENV_FILE\" ]; then echo \"Missing \$ENV_FILE\" >&2; exit 1; fi; sed -n 's/^PORT=//p' \"\$ENV_FILE\" | tail -n 1"
+        )"
+
+        if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
+          echo "Invalid PORT value in $REMOTE_APP_PATH/.env: $SERVICE_PORT"
+          exit 1
+        fi
+
+        umask 077
+        {
+          printf '%s=%s\n' "$IMAGE_ENV_VARIABLE_NAME" "$IMAGE"
+          printf 'PORT=%s\n' "$SERVICE_PORT"
+          for name in $ENV_VARIABLE_NAMES; do
+            printf '%s=%s\n' "$name" "${!name}"
+          done
+        } > "$ENV_FILE_LOCAL"
+
+        echo "Updating production .env and compose file..."
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p '$REMOTE_APP_PATH' && umask 077 && cat > '$REMOTE_APP_PATH/.env.pipeline'" < "$ENV_FILE_LOCAL"
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "mv '$REMOTE_APP_PATH/.env.pipeline' '$REMOTE_APP_PATH/.env' && chmod 600 '$REMOTE_APP_PATH/.env'"
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "cat > '$REMOTE_APP_PATH/$PROD_COMPOSE_FILE'" < "$COMPOSE_SOURCE_FILE"
+
+        echo "Deploying with Docker Compose..."
+        ssh "${SSH_OPTS[@]}" "$REMOTE" \
+          "REMOTE_APP_PATH='$REMOTE_APP_PATH' PROD_COMPOSE_FILE='$PROD_COMPOSE_FILE' CONTAINER_NAME='$CONTAINER_NAME' bash -se" << 'REMOTE_SCRIPT'
+        set -euo pipefail
+
+        cd "$REMOTE_APP_PATH"
+
+        if [ -f docker-compose.yml ]; then
+          echo "Stopping current compose project..."
+          docker compose -f docker-compose.yml down --remove-orphans || true
+        fi
+
+        echo "Stopping previous pipeline compose project..."
+        docker compose -f "$PROD_COMPOSE_FILE" down --remove-orphans || true
+
+        echo "Pulling production image..."
+        docker compose -f "$PROD_COMPOSE_FILE" pull
+
+        echo "Starting production compose project..."
+        docker compose -f "$PROD_COMPOSE_FILE" up -d --remove-orphans
+
+        echo "Verifying container is running..."
+        sleep 8
+        if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+          echo "Container $CONTAINER_NAME did not stay running."
+          docker ps -a --filter "name=^/${CONTAINER_NAME}$"
+          docker logs --tail 200 "$CONTAINER_NAME" || true
+          exit 1
+        fi
+
+        docker compose -f "$PROD_COMPOSE_FILE" ps
+
+        echo "Cleaning up dangling images..."
+        docker image prune -f
+
+        echo "Production deployment completed."
+        REMOTE_SCRIPT
+      displayName: Deploy to production with Docker Compose
+      env:
+        CONTAINER_REGISTRY: ${{ parameters.containerRegistry }}
+        IMAGE_REPOSITORY: ${{ parameters.imageRepository }}
+        TAG: $(tag)
+        CONTAINER_NAME: ${{ parameters.containerName }}
+        PROD_SSH_HOST: ${{ parameters.prodSshHost }}
+        PROD_SSH_USER: ${{ parameters.prodSshUser }}
+        REMOTE_APP_PATH: ${{ parameters.prodRemoteAppPath }}
+        PROD_COMPOSE_FILE: ${{ parameters.prodComposeFile }}
+        COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/${{ parameters.prodComposeFile }}
+        IMAGE_ENV_VARIABLE_NAME: ${{ parameters.imageEnvVariableName }}
+        ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
+        PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
+        ${{ each envVar in parameters.envVariables }}:
+          ${{ envVar.key }}: ${{ envVar.value }}
