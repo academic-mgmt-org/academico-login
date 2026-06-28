@@ -119,16 +119,7 @@ docker run --rm \
   '
 ```
 
-### 1.5. Si el contenedor de base desaparece, recrearlo
-
-Durante la prueba el volumen quedo disponible, pero el contenedor no estaba presente al validar. Se recreo con:
-
-```bash
-cd academico-esquema-bd
-docker compose up -d --build
-```
-
-### 1.6. Verificar columnas y tablas requeridas por login
+### 1.5. Verificar columnas y tablas requeridas por login
 
 ```bash
 docker exec academic-postgres-db \
@@ -164,7 +155,7 @@ roles
 usuarios
 ```
 
-### 1.7. Ejecutar bootstrap del login contra la base local
+### 1.6. Ejecutar bootstrap del login contra la base local
 
 ```bash
 cd academico-login
@@ -199,7 +190,7 @@ Usuarios de prueba creados:
 | `docente@demo.com` | `password123` | `docente` |
 | `administrador@demo.com` | `admin123` | `administrador` |
 
-### 1.8. Verificar bootstrap del login
+### 1.7. Verificar bootstrap del login
 
 ```bash
 docker exec academic-postgres-db \
@@ -231,7 +222,7 @@ docente@demo.com|docente|activo
 estudiante@demo.com|estudiante|activo
 ```
 
-### 1.9. Levantar `academico-login`
+### 1.8. Levantar `academico-login`
 
 ```bash
 cd academico-login
@@ -246,7 +237,7 @@ cd academico-login
 docker compose up -d --build
 ```
 
-### 1.10. Conectar `academico-login` a la red de la base local
+### 1.9. Conectar `academico-login` a la red de la base local
 
 ```bash
 cd academico-login
@@ -279,7 +270,7 @@ Resultado esperado:
 academic-postgres-db
 ```
 
-### 1.11. Verificar logs de arranque del login
+### 1.10. Verificar logs de arranque del login
 
 ```bash
 docker logs --tail 80 academico-login
@@ -299,7 +290,7 @@ En la prueba se verifico que el servicio mapeara estas rutas:
 /api/v1/whitelist/all
 ```
 
-### 1.12. Probar endpoints REST con HTTP/2 h2c
+### 1.11. Probar endpoints REST con HTTP/2 h2c
 
 El servicio Fastify esta levantado con `http2: true`, por lo que las pruebas REST se hicieron con:
 
@@ -476,7 +467,7 @@ PASS db_session                       estudiante@demo.com|revoked
 ALL_REST_ENDPOINT_CHECKS_PASSED
 ```
 
-### 1.13. Limpiar contenedores e imagenes creadas para la prueba
+### 1.12. Limpiar contenedores e imagenes creadas para la prueba
 
 ```bash
 set -e
@@ -497,7 +488,7 @@ fi
 docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | sort
 ```
 
-### 1.14. Restaurar o eliminar el `.env` local del login
+### 1.13. Restaurar o eliminar el `.env` local del login
 
 ```bash
 cd academico-login
