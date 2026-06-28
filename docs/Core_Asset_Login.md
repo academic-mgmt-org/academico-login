@@ -750,8 +750,11 @@ Fixes AB#26
 De acuerdo con los repositorios existentes en `academic-mgmt-org`, el `Authentication Service`
 corresponde al repositorio `academico-login` y se ubica dentro de la plataforma como Core
 Asset de identidad. La plataforma actual no expone repositorios independientes para
-`Authorization Service`, `Audit Service`, `File Service` ni `Reporting Service`; por tanto,
-no se listan como servicios existentes en esta vista.
+`matrículas`, `solicitudes`, `Authorization Service`, `Audit Service`, `File Service` ni
+`Reporting Service`; por tanto, no se listan como servicios implementados en esta vista.
+Sin embargo, `matrículas` y `solicitudes` sí aparecen como dominios del esquema académico
+y como destinos configurables del Gateway, por lo que quedan identificados como Core Assets
+modelados o previstos.
 
 ```text
 academic-mgmt-org
@@ -768,6 +771,13 @@ academic-mgmt-org
 │   │
 │   └── academico-notificaciones
 │       └── Notification Service: notificaciones académicas in-app
+│
+├── Core Assets modelados o previstos
+│   ├── Matrículas e Inscripciones
+│   │   └── Dominio presente en academico-esquema-bd y destino configurable del Gateway
+│   │
+│   └── Solicitudes Académicas
+│       └── Dominio presente en academico-esquema-bd y destino configurable del Gateway
 │
 ├── Componentes de plataforma
 │   ├── academico-gateway
@@ -802,6 +812,10 @@ Lectura correcta de responsabilidades:
   notificaciones propias del usuario.
 - `academico-calificaciones`: servicio existente para el dominio de calificaciones y
   evaluaciones académicas.
+- `Matrículas e Inscripciones`: dominio académico modelado en base de datos y contemplado
+  por el Gateway; falta repositorio/microservicio dedicado en `academic-mgmt-org`.
+- `Solicitudes Académicas`: dominio académico modelado en base de datos y contemplado
+  por el Gateway; falta repositorio/microservicio dedicado en `academic-mgmt-org`.
 
 ## Flujo Integrado
 
@@ -838,6 +852,11 @@ academico-gateway
       ├── /usuarios/*          -> academico-usuarios
       ├── /calificaciones/*    -> academico-calificaciones
       └── /notificaciones/*    -> academico-notificaciones
+
+      Dominios previstos cuando exista microservicio dedicado:
+
+      ├── /matriculas/*        -> Matrículas e Inscripciones
+      └── /solicitudes/*       -> Solicitudes Académicas
 ```
 
 ### Beneficio Estratégico
