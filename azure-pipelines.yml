@@ -84,12 +84,16 @@ stages:
 
         IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
         ENV_FILE_LOCAL="$(mktemp)"
-        COMPOSE_FILE_LOCAL="$(mktemp)"
 
         cleanup() {
-          rm -f "$ENV_FILE_LOCAL" "$COMPOSE_FILE_LOCAL"
+          rm -f "$ENV_FILE_LOCAL"
         }
         trap cleanup EXIT
+
+        if [ ! -f "$COMPOSE_SOURCE_FILE" ]; then
+          echo "Missing compose source file: $COMPOSE_SOURCE_FILE"
+          exit 1
+        fi
 
         mkdir -p "$REMOTE_APP_PATH"
 
@@ -108,6 +112,7 @@ stages:
 
         umask 077
         {
+          printf 'ACADEMICO_LOGIN_IMAGE=%s\n' "$IMAGE"
           printf 'PORT=%s\n' "$SERVICE_PORT"
           printf 'NODE_ENV=production\n'
           printf 'LOGIN_API_KEY=%s\n' "$LOGIN_API_KEY"
@@ -122,25 +127,11 @@ stages:
           printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
         } > "$ENV_FILE_LOCAL"
 
-        cat > "$COMPOSE_FILE_LOCAL" << EOF
-        services:
-          academico-login:
-            image: ${IMAGE}
-            container_name: ${CONTAINER_NAME}
-            restart: always
-            ports:
-              - "${SERVICE_PORT}:${SERVICE_PORT}"
-            env_file:
-              - .env
-            environment:
-              - NODE_ENV=production
-        EOF
-
         echo "Updating development .env and compose file..."
         mv "$ENV_FILE_LOCAL" "$REMOTE_APP_PATH/.env.pipeline"
         mv "$REMOTE_APP_PATH/.env.pipeline" "$REMOTE_APP_PATH/.env"
         chmod 600 "$REMOTE_APP_PATH/.env"
-        cp "$COMPOSE_FILE_LOCAL" "$REMOTE_APP_PATH/$DEV_COMPOSE_FILE"
+        cp "$COMPOSE_SOURCE_FILE" "$REMOTE_APP_PATH/$DEV_COMPOSE_FILE"
 
         cd "$REMOTE_APP_PATH"
 
@@ -181,6 +172,7 @@ stages:
         CONTAINER_NAME: $(containerName)
         REMOTE_APP_PATH: $(devRemoteAppPath)
         DEV_COMPOSE_FILE: $(devComposeFile)
+        COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/$(devComposeFile)
         LOGIN_API_KEY: $(LOGIN_API_KEY)
         JWT_SECRET: $(JWT_SECRET)
         JWT_DOC_SECRET: $(JWT_DOC_SECRET)
@@ -246,12 +238,16 @@ stages:
         IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
         SSH_DIR="$(mktemp -d)"
         ENV_FILE_LOCAL="$(mktemp)"
-        COMPOSE_FILE_LOCAL="$(mktemp)"
 
         cleanup() {
-          rm -rf "$SSH_DIR" "$ENV_FILE_LOCAL" "$COMPOSE_FILE_LOCAL"
+          rm -rf "$SSH_DIR" "$ENV_FILE_LOCAL"
         }
         trap cleanup EXIT
+
+        if [ ! -f "$COMPOSE_SOURCE_FILE" ]; then
+          echo "Missing compose source file: $COMPOSE_SOURCE_FILE"
+          exit 1
+        fi
 
         mkdir -p "$SSH_DIR"
         chmod 700 "$SSH_DIR"
@@ -289,6 +285,7 @@ stages:
 
         umask 077
         {
+          printf 'ACADEMICO_LOGIN_IMAGE=%s\n' "$IMAGE"
           printf 'PORT=%s\n' "$SERVICE_PORT"
           printf 'NODE_ENV=production\n'
           printf 'LOGIN_API_KEY=%s\n' "$LOGIN_API_KEY"
@@ -303,24 +300,10 @@ stages:
           printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
         } > "$ENV_FILE_LOCAL"
 
-        cat > "$COMPOSE_FILE_LOCAL" << EOF
-        services:
-          academico-login:
-            image: ${IMAGE}
-            container_name: ${CONTAINER_NAME}
-            restart: always
-            ports:
-              - "${SERVICE_PORT}:${SERVICE_PORT}"
-            env_file:
-              - .env
-            environment:
-              - NODE_ENV=production
-        EOF
-
         echo "Updating production .env and compose file..."
         ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p '$REMOTE_APP_PATH' && umask 077 && cat > '$REMOTE_APP_PATH/.env.pipeline'" < "$ENV_FILE_LOCAL"
         ssh "${SSH_OPTS[@]}" "$REMOTE" "mv '$REMOTE_APP_PATH/.env.pipeline' '$REMOTE_APP_PATH/.env' && chmod 600 '$REMOTE_APP_PATH/.env'"
-        ssh "${SSH_OPTS[@]}" "$REMOTE" "cat > '$REMOTE_APP_PATH/$PROD_COMPOSE_FILE'" < "$COMPOSE_FILE_LOCAL"
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "cat > '$REMOTE_APP_PATH/$PROD_COMPOSE_FILE'" < "$COMPOSE_SOURCE_FILE"
 
         echo "Deploying with Docker Compose..."
         ssh "${SSH_OPTS[@]}" "$REMOTE" \
@@ -369,6 +352,7 @@ stages:
         PROD_SSH_USER: $(prodSshUser)
         REMOTE_APP_PATH: $(prodRemoteAppPath)
         PROD_COMPOSE_FILE: $(prodComposeFile)
+        COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/$(prodComposeFile)
         PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
         LOGIN_API_KEY: $(LOGIN_API_KEY)
         JWT_SECRET: $(JWT_SECRET)

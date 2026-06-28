@@ -1,10 +1,10 @@
 services:
   academico-login:
-    image: acracademicoutn.azurecr.io/academicmgmtorgacademicologin:20
+    image: ${ACADEMICO_LOGIN_IMAGE}
     container_name: academico-login
     restart: always
     ports:
-      - "3001:3001"
+      - "${PORT}:${PORT}"
     env_file:
       - .env
     environment:
