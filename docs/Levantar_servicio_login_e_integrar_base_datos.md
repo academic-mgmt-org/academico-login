@@ -601,3 +601,235 @@ docker rmi academico-login:latest academico-postgres-ssl:15-alpine postgres:15-a
 cd academico-login
 rm -f .env
 ```
+
+## 4. Integrar con una base de datos PostgreSQL ya existente
+
+Usar esta seccion cuando ya existe una base PostgreSQL y solo se quiere conectar `academico-login` a ella.
+
+### 4.1. Definir variables de conexion
+
+Editar o crear el archivo `.env` del repositorio `academico-login`:
+
+```bash
+cd academico-login
+cat > .env <<'EOF'
+PORT=3001
+NODE_ENV=production
+LOGIN_API_KEY=login-api-key-segura
+JWT_SECRET=jwt-secret-seguro
+JWT_DOC_SECRET=jwt-secret-seguro
+JWT_ACCESS_TTL=2h
+JWT_REFRESH_TTL=7d
+DB_HOST=host-de-la-base
+DB_PORT=5432
+DB_DATABASE=nombre_base
+DB_USER=usuario_base
+DB_PASSWORD=password_base
+EOF
+```
+
+Valores que se deben cambiar:
+
+| Variable | Valor a colocar |
+| --- | --- |
+| `LOGIN_API_KEY` | Clave interna que enviaran los consumidores en el header `x-api-key` |
+| `JWT_SECRET` | Secreto usado para firmar tokens JWT |
+| `JWT_DOC_SECRET` | Usar el mismo valor de `JWT_SECRET` si no hay un secreto documental separado |
+| `DB_HOST` | Host o nombre DNS de la base PostgreSQL |
+| `DB_PORT` | Puerto PostgreSQL, normalmente `5432` |
+| `DB_DATABASE` | Nombre de la base de datos |
+| `DB_USER` | Usuario de conexion |
+| `DB_PASSWORD` | Password del usuario de conexion |
+
+Para usar esos valores en los comandos `psql` de esta seccion, cargarlos en la terminal:
+
+```bash
+cd academico-login
+set -a
+source .env
+set +a
+```
+
+### 4.2. Probar conectividad y SSL
+
+Si la base exige SSL:
+
+```bash
+PGPASSWORD="$DB_PASSWORD" psql \
+  "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER sslmode=require" \
+  -c "SELECT current_database(), current_user; SHOW ssl;"
+```
+
+Si la base no usa SSL, primero se debe ajustar `src/db.js` para no forzar SSL o para hacerlo configurable. El codigo actual conecta con SSL.
+
+### 4.3. Validar que existan las tablas esperadas
+
+```bash
+PGPASSWORD="$DB_PASSWORD" psql \
+  "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER sslmode=require" \
+  -Atc "
+    SELECT table_schema || '.' || table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'academico'
+      AND table_name IN ('roles', 'usuarios')
+    ORDER BY table_name;
+  "
+```
+
+Resultado esperado:
+
+```text
+academico.roles
+academico.usuarios
+```
+
+### 4.4. Validar columnas requeridas por `academico-login`
+
+```bash
+PGPASSWORD="$DB_PASSWORD" psql \
+  "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER sslmode=require" \
+  -Atc "
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'academico'
+      AND table_name = 'usuarios'
+      AND column_name IN (
+        'id',
+        'rol_id',
+        'nombres',
+        'apellidos',
+        'email',
+        'password_hash',
+        'identificacion',
+        'estado'
+      )
+    ORDER BY column_name;
+  "
+```
+
+Debe devolver estas columnas:
+
+```text
+apellidos
+email
+estado
+id
+identificacion
+nombres
+password_hash
+rol_id
+```
+
+Validar columnas de roles:
+
+```bash
+PGPASSWORD="$DB_PASSWORD" psql \
+  "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER sslmode=require" \
+  -Atc "
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'academico'
+      AND table_name = 'roles'
+      AND column_name IN ('id', 'nombre')
+    ORDER BY column_name;
+  "
+```
+
+Resultado esperado:
+
+```text
+id
+nombre
+```
+
+### 4.5. Crear la tabla de sesiones del login
+
+Este comando no modifica usuarios ni roles; solo crea `academico.auth_sessions` si no existe.
+
+```bash
+cd academico-login
+
+PGPASSWORD="$DB_PASSWORD" psql \
+  "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER sslmode=require" \
+  -v ON_ERROR_STOP=1 \
+  -f database/migrations/V1__login_core_asset.sql
+```
+
+### 4.6. Si la base no tiene tablas compatibles
+
+Si la base existente tiene usuarios en otras tablas o con otros nombres de columnas, crear vistas compatibles o adaptar `src/auth/auth.service.js`.
+
+Ejemplo con vistas:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS academico;
+
+CREATE OR REPLACE VIEW academico.roles AS
+SELECT
+  id_rol AS id,
+  nombre_rol AS nombre,
+  descripcion
+FROM seguridad.roles;
+
+CREATE OR REPLACE VIEW academico.usuarios AS
+SELECT
+  id_usuario AS id,
+  id_rol AS rol_id,
+  nombres,
+  apellidos,
+  correo AS email,
+  clave_hash AS password_hash,
+  documento AS identificacion,
+  CASE
+    WHEN habilitado = true THEN 'activo'
+    ELSE 'inactivo'
+  END AS estado
+FROM seguridad.usuarios;
+```
+
+Aplicar el SQL de vistas con:
+
+```bash
+PGPASSWORD="$DB_PASSWORD" psql \
+  "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER sslmode=require" \
+  -v ON_ERROR_STOP=1 \
+  -f vistas_login.sql
+```
+
+### 4.7. Revisar `.env` para la base existente
+
+Si `academico-login` se ejecuta en Docker, `DB_HOST` debe ser alcanzable desde el contenedor. Revisar los valores finales sin imprimir secretos:
+
+```bash
+cd academico-login
+sed -E 's/(PASSWORD|SECRET|KEY)=.*/\1=<redacted>/' .env
+```
+
+### 4.8. Levantar el servicio de login
+
+```bash
+cd academico-login
+docker compose up -d --build
+```
+
+Ver logs:
+
+```bash
+docker compose logs -f academico-login
+```
+
+### 4.9. Probar login contra la base existente
+
+Reemplazar usuario y password por credenciales reales de un usuario activo en la base existente:
+
+```bash
+curl --http2-prior-knowledge -X POST http://localhost:3001/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $LOGIN_API_KEY" \
+  -d '{
+    "username": "usuario@dominio.com",
+    "password": "password-real"
+  }'
+```
+
+Si responde `accessToken`, `refreshToken` y `sessionId`, la integracion con la base existente esta funcionando.
