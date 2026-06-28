@@ -482,6 +482,58 @@ message ValidateTokenResponse {
 
 ---
 
+## DTOs de integración REST y ConnectRPC/gRPC
+
+Los DTOs del core asset se implementan en:
+
+```text
+src/auth/dto/auth.dto.js
+```
+
+Estos objetos definen el contrato reutilizable entre el controlador REST, las rutas ConnectRPC/gRPC y la capa de servicio. Su objetivo es mantener una sola forma de normalizar entradas, validar campos mínimos y mapear respuestas para nuevas líneas de producto o clientes integradores.
+
+### DTOs de entrada
+
+```text
+LoginRequestDto
+RefreshTokenRequestDto
+LogoutRequestDto
+ValidateTokenRequestDto
+RequestContextDto
+```
+
+Responsabilidades:
+
+- `LoginRequestDto`: exige `username` y `password`, normaliza `username` a minúsculas y acepta aliases `appVersion`/`app_version` y `passwordEncoding`/`password_encoding`.
+- `RefreshTokenRequestDto`: exige `refreshToken` y acepta `refreshToken`/`refresh_token` o el token como cadena directa.
+- `LogoutRequestDto`: acepta `token`, `refreshToken`/`refresh_token` o un token como cadena directa; no exige token en body para permitir fallback por headers.
+- `ValidateTokenRequestDto`: normaliza el token recibido desde body o cadena directa.
+- `RequestContextDto`: extrae `ipAddress` desde `x-forwarded-for` o `x-real-ip` y `userAgent` desde `user-agent` para registrar contexto de sesión.
+
+### DTOs de salida
+
+```text
+LoginResponseDto
+ValidateTokenResponseDto
+LogoutResponseDto
+```
+
+Responsabilidades:
+
+- `LoginResponseDto`: expone `accessToken`, `refreshToken`, `tokenType`, `expiresIn`, `sessionId`, `mfaRequired` y `requiresAppUpdate`.
+- `ValidateTokenResponseDto`: expone `isValid`, `identifier`, `email`, `sessionId`, `userId`, `role` y `applications` cuando aplica.
+- `LogoutResponseDto`: expone `success`, `revoked` y `message`.
+
+Los DTOs se consumen directamente desde:
+
+```text
+src/auth/auth.controller.js
+src/auth/auth.service.js
+src/connect-routes.js
+```
+
+---
+
 # 11. Eventos de Dominio
 
 El servicio debe emitir eventos técnicos para Auditoría y Observabilidad.
