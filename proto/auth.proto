@@ -33,6 +33,7 @@ message ValidateTokenResponse {
   string session_id = 4;
   string user_id = 5;
   string role = 6;
+  repeated ApplicationAccess applications = 7;
 }
 
 message LogoutRequest {
@@ -40,14 +41,65 @@ message LogoutRequest {
   string refresh_token = 2;
 }
 
+message TokenValidityResponse {
+  bool is_valid = 1;
+}
+
 message GenericResponse {
   bool success = 1;
   string message = 2;
+  bool revoked = 3;
+}
+
+message Empty {}
+
+message WhitelistResponse {
+  repeated string routes = 1;
+}
+
+message HealthResponse {
+  string status = 1;
+  string service = 2;
+  string timestamp = 3;
+  double uptime = 4;
+}
+
+message ReadyResponse {
+  bool ready = 1;
+  string timestamp = 2;
+}
+
+message LiveResponse {
+  bool alive = 1;
+  string timestamp = 2;
+  double uptime = 3;
+}
+
+message ApplicationAccess {
+  string app_name = 1;
+  repeated RoleAccess roles = 2;
+}
+
+message RoleAccess {
+  string role_name = 1;
+  repeated string permissions = 2;
 }
 
 service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse) {}
   rpc RefreshToken(RefreshTokenRequest) returns (LoginResponse) {}
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse) {}
+  rpc ValidateTokenSimple(ValidateTokenRequest) returns (TokenValidityResponse) {}
+  rpc ValidateTokenWithHeader(Empty) returns (ValidateTokenResponse) {}
   rpc Logout(LogoutRequest) returns (GenericResponse) {}
+}
+
+service WhitelistService {
+  rpc GetAll(Empty) returns (WhitelistResponse) {}
+}
+
+service HealthService {
+  rpc Health(Empty) returns (HealthResponse) {}
+  rpc Ready(Empty) returns (ReadyResponse) {}
+  rpc Live(Empty) returns (LiveResponse) {}
 }

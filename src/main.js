@@ -42,7 +42,8 @@ async function bootstrap() {
         if (
           serviceName === 'grpc.reflection.v1.ServerReflection' ||
           serviceName === 'grpc.reflection.v1alpha.ServerReflection' ||
-          serviceName === 'grpc.health.v1.Health'
+          serviceName === 'grpc.health.v1.Health' ||
+          serviceName === 'auth.v1.HealthService'
         ) {
           return await next(req);
         }

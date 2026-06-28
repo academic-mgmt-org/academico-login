@@ -9,10 +9,10 @@ Este servicio es el Core Asset de autenticacion para el flujo usado por
 
 - Valida credenciales de usuario.
 - Emite `accessToken` y `refreshToken` JWT.
-- Renueva sesiones mediante `POST /api/v1/auth/refresh`.
-- Revoca sesiones mediante `POST /api/v1/auth/logout`.
-- Valida JWT mediante `POST /api/v1/auth/validate-token-2`.
-- Publica la whitelist de rutas publicas mediante `GET /api/v1/whitelist/all`.
+- Renueva sesiones mediante `auth.v1.AuthService/RefreshToken`.
+- Revoca sesiones mediante `auth.v1.AuthService/Logout`.
+- Valida JWT mediante `auth.v1.AuthService/ValidateTokenWithHeader`.
+- Publica la whitelist de rutas publicas mediante `auth.v1.WhitelistService/GetAll`.
 - Protege llamadas internas con `LOGIN_API_KEY`.
 - Consulta la tabla `academico.usuarios` para validar credenciales, pero no
   administra el ciclo de vida de usuarios.
@@ -63,21 +63,18 @@ servicio conserva compatibilidad y no bloquea el login.
 
 ## Contratos
 
-REST:
-
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
-- `POST /api/v1/auth/logout`
-- `POST /api/v1/auth/validate-token`
-- `POST /api/v1/auth/validate-token-2`
-- `GET /api/v1/whitelist/all`
-
 ConnectRPC/gRPC:
 
 - `auth.v1.AuthService/Login`
 - `auth.v1.AuthService/RefreshToken`
 - `auth.v1.AuthService/ValidateToken`
+- `auth.v1.AuthService/ValidateTokenSimple`
+- `auth.v1.AuthService/ValidateTokenWithHeader`
 - `auth.v1.AuthService/Logout`
+- `auth.v1.WhitelistService/GetAll`
+- `auth.v1.HealthService/Health`
+- `auth.v1.HealthService/Ready`
+- `auth.v1.HealthService/Live`
 
 ## Ejecucion local
 

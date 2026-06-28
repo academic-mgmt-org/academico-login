@@ -4,9 +4,7 @@ import { LoggerModule, Logger } from 'nestjs-pino';
 import { pinoLoggerConfig } from './config/pino-logger.config';
 import { HttpExceptionFilter } from './filters/http-exception.filter';
 import { APP_FILTER } from '@nestjs/core';
-import { HealthController } from './controller/health.controller';
 import { AuthModule } from './auth/auth.module';
-import { ApiKeyMiddleware } from './middleware/api-key.middleware';
 
 @Module({
   imports: [
@@ -17,7 +15,6 @@ import { ApiKeyMiddleware } from './middleware/api-key.middleware';
     }),
     AuthModule
   ],
-  controllers: [HealthController],
   providers: [
     Logger,
     {
@@ -26,11 +23,4 @@ import { ApiKeyMiddleware } from './middleware/api-key.middleware';
     }
   ]
 })
-export class AppModule {
-  configure(consumer) {
-    consumer
-      .apply(ApiKeyMiddleware)
-      .exclude('/api/health', '/api/ready', '/api/live')
-      .forRoutes('*');
-  }
-}
+export class AppModule {}

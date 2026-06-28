@@ -8,7 +8,7 @@ import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2
  * Describes the file proto/auth.proto.
  */
 export const file_proto_auth = /*@__PURE__*/
-  fileDesc("ChBwcm90by9hdXRoLnByb3RvEgdhdXRoLnYxImIKDExvZ2luUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRITCgthcHBfdmVyc2lvbhgDIAEoCRIZChFwYXNzd29yZF9lbmNvZGluZxgEIAEoCSKrAQoNTG9naW5SZXNwb25zZRIUCgxhY2Nlc3NfdG9rZW4YASABKAkSFQoNcmVmcmVzaF90b2tlbhgCIAEoCRIUCgxtZmFfcmVxdWlyZWQYAyABKAgSGwoTcmVxdWlyZXNfYXBwX3VwZGF0ZRgEIAEoCBISCgp0b2tlbl90eXBlGAUgASgJEhIKCmV4cGlyZXNfaW4YBiABKAUSEgoKc2Vzc2lvbl9pZBgHIAEoCSIsChNSZWZyZXNoVG9rZW5SZXF1ZXN0EhUKDXJlZnJlc2hfdG9rZW4YASABKAkiJQoUVmFsaWRhdGVUb2tlblJlcXVlc3QSDQoFdG9rZW4YASABKAkifwoVVmFsaWRhdGVUb2tlblJlc3BvbnNlEhAKCGlzX3ZhbGlkGAEgASgIEhIKCmlkZW50aWZpZXIYAiABKAkSDQoFZW1haWwYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCRIPCgd1c2VyX2lkGAUgASgJEgwKBHJvbGUYBiABKAkiNQoNTG9nb3V0UmVxdWVzdBINCgV0b2tlbhgBIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAIgASgJIjMKD0dlbmVyaWNSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkynwIKC0F1dGhTZXJ2aWNlEjgKBUxvZ2luEhUuYXV0aC52MS5Mb2dpblJlcXVlc3QaFi5hdXRoLnYxLkxvZ2luUmVzcG9uc2UiABJGCgxSZWZyZXNoVG9rZW4SHC5hdXRoLnYxLlJlZnJlc2hUb2tlblJlcXVlc3QaFi5hdXRoLnYxLkxvZ2luUmVzcG9uc2UiABJQCg1WYWxpZGF0ZVRva2VuEh0uYXV0aC52MS5WYWxpZGF0ZVRva2VuUmVxdWVzdBoeLmF1dGgudjEuVmFsaWRhdGVUb2tlblJlc3BvbnNlIgASPAoGTG9nb3V0EhYuYXV0aC52MS5Mb2dvdXRSZXF1ZXN0GhguYXV0aC52MS5HZW5lcmljUmVzcG9uc2UiAGIGcHJvdG8z");
+  fileDesc("ChBwcm90by9hdXRoLnByb3RvEgdhdXRoLnYxImIKDExvZ2luUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRITCgthcHBfdmVyc2lvbhgDIAEoCRIZChFwYXNzd29yZF9lbmNvZGluZxgEIAEoCSKrAQoNTG9naW5SZXNwb25zZRIUCgxhY2Nlc3NfdG9rZW4YASABKAkSFQoNcmVmcmVzaF90b2tlbhgCIAEoCRIUCgxtZmFfcmVxdWlyZWQYAyABKAgSGwoTcmVxdWlyZXNfYXBwX3VwZGF0ZRgEIAEoCBISCgp0b2tlbl90eXBlGAUgASgJEhIKCmV4cGlyZXNfaW4YBiABKAUSEgoKc2Vzc2lvbl9pZBgHIAEoCSIsChNSZWZyZXNoVG9rZW5SZXF1ZXN0EhUKDXJlZnJlc2hfdG9rZW4YASABKAkiJQoUVmFsaWRhdGVUb2tlblJlcXVlc3QSDQoFdG9rZW4YASABKAkisQEKFVZhbGlkYXRlVG9rZW5SZXNwb25zZRIQCghpc192YWxpZBgBIAEoCBISCgppZGVudGlmaWVyGAIgASgJEg0KBWVtYWlsGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkSDwoHdXNlcl9pZBgFIAEoCRIMCgRyb2xlGAYgASgJEjAKDGFwcGxpY2F0aW9ucxgHIAMoCzIaLmF1dGgudjEuQXBwbGljYXRpb25BY2Nlc3MiNQoNTG9nb3V0UmVxdWVzdBINCgV0b2tlbhgBIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAIgASgJIikKFVRva2VuVmFsaWRpdHlSZXNwb25zZRIQCghpc192YWxpZBgBIAEoCCJECg9HZW5lcmljUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEg8KB3Jldm9rZWQYAyABKAgiBwoFRW1wdHkiIwoRV2hpdGVsaXN0UmVzcG9uc2USDgoGcm91dGVzGAEgAygJIlQKDkhlYWx0aFJlc3BvbnNlEg4KBnN0YXR1cxgBIAEoCRIPCgdzZXJ2aWNlGAIgASgJEhEKCXRpbWVzdGFtcBgDIAEoCRIOCgZ1cHRpbWUYBCABKAEiMQoNUmVhZHlSZXNwb25zZRINCgVyZWFkeRgBIAEoCBIRCgl0aW1lc3RhbXAYAiABKAkiQAoMTGl2ZVJlc3BvbnNlEg0KBWFsaXZlGAEgASgIEhEKCXRpbWVzdGFtcBgCIAEoCRIOCgZ1cHRpbWUYAyABKAEiSQoRQXBwbGljYXRpb25BY2Nlc3MSEAoIYXBwX25hbWUYASABKAkSIgoFcm9sZXMYAiADKAsyEy5hdXRoLnYxLlJvbGVBY2Nlc3MiNAoKUm9sZUFjY2VzcxIRCglyb2xlX25hbWUYASABKAkSEwoLcGVybWlzc2lvbnMYAiADKAkyxAMKC0F1dGhTZXJ2aWNlEjgKBUxvZ2luEhUuYXV0aC52MS5Mb2dpblJlcXVlc3QaFi5hdXRoLnYxLkxvZ2luUmVzcG9uc2UiABJGCgxSZWZyZXNoVG9rZW4SHC5hdXRoLnYxLlJlZnJlc2hUb2tlblJlcXVlc3QaFi5hdXRoLnYxLkxvZ2luUmVzcG9uc2UiABJQCg1WYWxpZGF0ZVRva2VuEh0uYXV0aC52MS5WYWxpZGF0ZVRva2VuUmVxdWVzdBoeLmF1dGgudjEuVmFsaWRhdGVUb2tlblJlc3BvbnNlIgASVgoTVmFsaWRhdGVUb2tlblNpbXBsZRIdLmF1dGgudjEuVmFsaWRhdGVUb2tlblJlcXVlc3QaHi5hdXRoLnYxLlRva2VuVmFsaWRpdHlSZXNwb25zZSIAEksKF1ZhbGlkYXRlVG9rZW5XaXRoSGVhZGVyEg4uYXV0aC52MS5FbXB0eRoeLmF1dGgudjEuVmFsaWRhdGVUb2tlblJlc3BvbnNlIgASPAoGTG9nb3V0EhYuYXV0aC52MS5Mb2dvdXRSZXF1ZXN0GhguYXV0aC52MS5HZW5lcmljUmVzcG9uc2UiADJKChBXaGl0ZWxpc3RTZXJ2aWNlEjYKBkdldEFsbBIOLmF1dGgudjEuRW1wdHkaGi5hdXRoLnYxLldoaXRlbGlzdFJlc3BvbnNlIgAyqAEKDUhlYWx0aFNlcnZpY2USMwoGSGVhbHRoEg4uYXV0aC52MS5FbXB0eRoXLmF1dGgudjEuSGVhbHRoUmVzcG9uc2UiABIxCgVSZWFkeRIOLmF1dGgudjEuRW1wdHkaFi5hdXRoLnYxLlJlYWR5UmVzcG9uc2UiABIvCgRMaXZlEg4uYXV0aC52MS5FbXB0eRoVLmF1dGgudjEuTGl2ZVJlc3BvbnNlIgBiBnByb3RvMw");
 
 /**
  * Describes the message auth.v1.LoginRequest.
@@ -53,15 +53,83 @@ export const LogoutRequestSchema = /*@__PURE__*/
   messageDesc(file_proto_auth, 5);
 
 /**
+ * Describes the message auth.v1.TokenValidityResponse.
+ * Use `create(TokenValidityResponseSchema)` to create a new message.
+ */
+export const TokenValidityResponseSchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 6);
+
+/**
  * Describes the message auth.v1.GenericResponse.
  * Use `create(GenericResponseSchema)` to create a new message.
  */
 export const GenericResponseSchema = /*@__PURE__*/
-  messageDesc(file_proto_auth, 6);
+  messageDesc(file_proto_auth, 7);
+
+/**
+ * Describes the message auth.v1.Empty.
+ * Use `create(EmptySchema)` to create a new message.
+ */
+export const EmptySchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 8);
+
+/**
+ * Describes the message auth.v1.WhitelistResponse.
+ * Use `create(WhitelistResponseSchema)` to create a new message.
+ */
+export const WhitelistResponseSchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 9);
+
+/**
+ * Describes the message auth.v1.HealthResponse.
+ * Use `create(HealthResponseSchema)` to create a new message.
+ */
+export const HealthResponseSchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 10);
+
+/**
+ * Describes the message auth.v1.ReadyResponse.
+ * Use `create(ReadyResponseSchema)` to create a new message.
+ */
+export const ReadyResponseSchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 11);
+
+/**
+ * Describes the message auth.v1.LiveResponse.
+ * Use `create(LiveResponseSchema)` to create a new message.
+ */
+export const LiveResponseSchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 12);
+
+/**
+ * Describes the message auth.v1.ApplicationAccess.
+ * Use `create(ApplicationAccessSchema)` to create a new message.
+ */
+export const ApplicationAccessSchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 13);
+
+/**
+ * Describes the message auth.v1.RoleAccess.
+ * Use `create(RoleAccessSchema)` to create a new message.
+ */
+export const RoleAccessSchema = /*@__PURE__*/
+  messageDesc(file_proto_auth, 14);
 
 /**
  * @generated from service auth.v1.AuthService
  */
 export const AuthService = /*@__PURE__*/
   serviceDesc(file_proto_auth, 0);
+
+/**
+ * @generated from service auth.v1.WhitelistService
+ */
+export const WhitelistService = /*@__PURE__*/
+  serviceDesc(file_proto_auth, 1);
+
+/**
+ * @generated from service auth.v1.HealthService
+ */
+export const HealthService = /*@__PURE__*/
+  serviceDesc(file_proto_auth, 2);
 

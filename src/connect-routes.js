@@ -1,4 +1,8 @@
-import { AuthService as AuthRpcService } from './gen/proto/auth_pb.js';
+import {
+  AuthService as AuthRpcService,
+  HealthService as HealthRpcService,
+  WhitelistService as WhitelistRpcService,
+} from './gen/proto/auth_pb.js';
 import { AuthService as AuthDomainService } from './auth/auth.service.js';
 import { ConnectError, Code } from '@connectrpc/connect';
 import { readFileSync } from 'fs';
@@ -6,9 +10,15 @@ import { join } from 'path';
 import {
   LoginRequestDto,
   LogoutRequestDto,
+  RequestContextDto,
   RefreshTokenRequestDto,
   ValidateTokenRequestDto,
 } from './auth/dto/auth.dto.js';
+
+const WHITELIST_ROUTES = [
+  '/login/api/v1/auth/login',
+  '/login/api/v1/auth/refresh',
+];
 
 function toConnectError(err) {
   let code = Code.Internal;
@@ -48,6 +58,36 @@ function toLoginResponse(result) {
   };
 }
 
+function getRequestHeader(context, name) {
+  return context?.requestHeader?.get(name) || undefined;
+}
+
+function toRequestContext(context) {
+  return RequestContextDto.fromHeaders({
+    'x-forwarded-for': getRequestHeader(context, 'x-forwarded-for'),
+    'x-real-ip': getRequestHeader(context, 'x-real-ip'),
+    'user-agent': getRequestHeader(context, 'user-agent'),
+  });
+}
+
+function toValidateTokenResponse(validation) {
+  return {
+    isValid: validation.isValid,
+    identifier: validation.identifier || '',
+    email: validation.email || '',
+    sessionId: validation.sessionId || '',
+    userId: validation.userId || '',
+    role: validation.role || '',
+    applications: (validation.applications || []).map((application) => ({
+      appName: application.appName || '',
+      roles: (application.roles || []).map((role) => ({
+        roleName: role.roleName || '',
+        permissions: role.permissions || [],
+      })),
+    })),
+  };
+}
+
 /**
  * ConnectRPC routes definitions.
  * @param {import('@connectrpc/connect').ConnectRouter} router
@@ -58,7 +98,7 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
   const authService = app.get(AuthDomainService);
 
   router.service(AuthRpcService, {
-    async login(req) {
+    async login(req, context) {
       try {
         const result = await authService.login(
           LoginRequestDto.from({
@@ -67,6 +107,7 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
             appVersion: req.appVersion,
             passwordEncoding: req.passwordEncoding,
           }),
+          toRequestContext(context),
         );
         return toLoginResponse(result);
       } catch (err) {
@@ -89,34 +130,81 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
       try {
         const tokenRequest = ValidateTokenRequestDto.from(req);
         const validation = await authService.validateToken2(tokenRequest.token);
-        return {
-          isValid: validation.isValid,
-          identifier: validation.identifier || '',
-          email: validation.email || '',
-          sessionId: validation.sessionId || '',
-          userId: validation.userId || '',
-          role: validation.role || '',
-        };
+        return toValidateTokenResponse(validation);
       } catch (err) {
         throw toConnectError(err);
       }
     },
 
-    async logout(req) {
+    async validateTokenSimple(req) {
+      try {
+        const tokenRequest = ValidateTokenRequestDto.from(req);
+        const isValid = await authService.validateToken(tokenRequest.token);
+        return { isValid };
+      } catch (err) {
+        throw toConnectError(err);
+      }
+    },
+
+    async validateTokenWithHeader(_req, context) {
+      try {
+        const authorization = getRequestHeader(context, 'authorization');
+        const validation = await authService.validateToken2(authorization);
+        return toValidateTokenResponse(validation);
+      } catch (err) {
+        throw toConnectError(err);
+      }
+    },
+
+    async logout(req, context) {
       try {
         const result = await authService.logout(
           LogoutRequestDto.from({
             token: req.token,
             refreshToken: req.refreshToken,
           }),
+          getRequestHeader(context, 'authorization'),
         );
         return {
           success: result.success,
           message: result.message,
+          revoked: Boolean(result.revoked),
         };
       } catch (err) {
         throw toConnectError(err);
       }
+    },
+  });
+
+  router.service(WhitelistRpcService, {
+    getAll() {
+      return { routes: WHITELIST_ROUTES };
+    },
+  });
+
+  router.service(HealthRpcService, {
+    health() {
+      return {
+        status: 'healthy',
+        service: 'academico-login',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+      };
+    },
+
+    ready() {
+      return {
+        ready: true,
+        timestamp: new Date().toISOString(),
+      };
+    },
+
+    live() {
+      return {
+        alive: true,
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+      };
     },
   });
 
