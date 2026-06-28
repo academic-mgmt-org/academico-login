@@ -66,7 +66,192 @@ source .env
 set +a
 ```
 
-## 4. Preparar la base de datos PostgreSQL
+## 4. Flujo local con `academico-esquema-bd` y Docker Compose
+
+Usar este flujo cuando:
+
+- la base de datos se levanta desde `/home/azureuser/academico-esquema-bd`;
+- `academico-login` se levanta con el `docker-compose.yml` de `/home/azureuser/academico-login`;
+- ambos servicios corren en Docker, pero en Compose separados.
+
+### 4.1. Levantar PostgreSQL local con SSL
+
+Desde el repositorio de esquema:
+
+```bash
+cd /home/azureuser/academico-esquema-bd
+docker compose up -d --build
+```
+
+Verificar que PostgreSQL esta activo y con SSL:
+
+```bash
+docker exec academic-postgres-db \
+  psql -U academic_user -d academic_management_db -c "SHOW ssl;"
+```
+
+Debe responder:
+
+```text
+ ssl
+-----
+ on
+```
+
+### 4.2. Aplicar el esquema compatible con `academico-login`
+
+El Compose de `academico-esquema-bd` monta automaticamente `migrations/V1__init_schema.sql` cuando el volumen esta vacio. Para `academico-login` se necesita el esquema simplificado que queda despues de aplicar `V2` y las migraciones posteriores.
+
+Este paso es para una base local de pruebas. `V2__simplificar_esquema.sql` elimina y recrea tablas del esquema academico; no ejecutarlo sobre una base con datos que se deban conservar.
+
+Aplicar `V2` en adelante con un cliente PostgreSQL temporal en Docker:
+
+```bash
+cd /home/azureuser/academico-esquema-bd
+
+docker run --rm \
+  --network academico-esquema-bd_default \
+  -v "$PWD":/work \
+  -w /work \
+  -e PGPASSWORD=academic_password \
+  -e PGSSLMODE=require \
+  postgres:15-alpine \
+  sh -lc '
+    for file in $(find migrations -name "V*__*.sql" | sort -V); do
+      case "$file" in
+        */V1__*) continue ;;
+      esac
+      echo "Aplicando $file"
+      psql -v ON_ERROR_STOP=1 \
+        -h academic-postgres-db \
+        -p 5432 \
+        -U academic_user \
+        -d academic_management_db \
+        -f "$file"
+    done
+  '
+```
+
+Al terminar, validar que las tablas tienen las columnas esperadas:
+
+```bash
+docker exec academic-postgres-db \
+  psql -U academic_user -d academic_management_db -c "\d academico.usuarios"
+```
+
+La tabla debe exponer columnas como `id`, `rol_id`, `nombres`, `apellidos`, `email`, `password_hash`, `identificacion` y `estado`.
+
+### 4.3. Crear sesiones y usuarios de prueba para login
+
+Desde el repositorio de login, ejecutar el bootstrap contra la base local:
+
+```bash
+cd /home/azureuser/academico-login
+
+docker run --rm \
+  --network academico-esquema-bd_default \
+  -v "$PWD":/work \
+  -w /work \
+  -e PGPASSWORD=academic_password \
+  -e PGSSLMODE=require \
+  postgres:15-alpine \
+  psql -v ON_ERROR_STOP=1 \
+    -h academic-postgres-db \
+    -p 5432 \
+    -U academic_user \
+    -d academic_management_db \
+    -f database/scripts/bootstrap_login_schema.sql
+```
+
+Este paso crea o actualiza:
+
+- `academico.auth_sessions`;
+- indices usados por login;
+- roles base;
+- usuarios de prueba.
+
+Credenciales de prueba:
+
+| Usuario | Password | Rol |
+| --- | --- | --- |
+| `estudiante@demo.com` | `password123` | `estudiante` |
+| `docente@demo.com` | `password123` | `docente` |
+| `administrador@demo.com` | `admin123` | `administrador` |
+
+### 4.4. Configurar `/home/azureuser/academico-login/.env`
+
+Como `academico-login` correra dentro de Docker, `DB_HOST` debe ser el nombre del contenedor de PostgreSQL, no `localhost`:
+
+```env
+PORT=3001
+NODE_ENV=production
+LOGIN_API_KEY=local-login-api-key
+JWT_SECRET=local-jwt-secret
+JWT_DOC_SECRET=local-jwt-secret
+JWT_ACCESS_TTL=2h
+JWT_REFRESH_TTL=7d
+DB_HOST=academic-postgres-db
+DB_PORT=5432
+DB_DATABASE=academic_management_db
+DB_USER=academic_user
+DB_PASSWORD=academic_password
+```
+
+Si el servicio se ejecuta sin Docker desde el host, entonces `DB_HOST` debe ser `localhost`. Para el flujo con Docker Compose de `academico-login`, usar `academic-postgres-db`.
+
+### 4.5. Levantar `academico-login` y conectarlo a la red de la base
+
+Desde el repositorio de login:
+
+```bash
+cd /home/azureuser/academico-login
+docker compose up -d --build
+```
+
+Como la base y el login estan en Compose separados, conectar el contenedor de login a la red del Compose de base de datos:
+
+```bash
+docker network connect academico-esquema-bd_default academico-login 2>/dev/null || true
+```
+
+Este comando debe repetirse si el contenedor `academico-login` se elimina y se crea de nuevo. Para dejarlo permanente, se puede agregar una red externa en el `docker-compose.yml` del login:
+
+```yaml
+services:
+  academico-login:
+    networks:
+      - default
+      - academico-db
+
+networks:
+  academico-db:
+    external: true
+    name: academico-esquema-bd_default
+```
+
+### 4.6. Validar login end to end
+
+Health check:
+
+```bash
+curl http://localhost:3001/api/health
+```
+
+Login:
+
+```bash
+curl -X POST http://localhost:3001/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: local-login-api-key" \
+  -d '{
+    "username": "estudiante@demo.com",
+    "password": "password123"
+  }'
+```
+
+La respuesta debe incluir `accessToken`, `refreshToken` y `sessionId`.
+
+## 5. Preparar la base de datos PostgreSQL
 
 Si la base esta vacia y no tiene las tablas del dominio de login, ejecutar el script de arranque:
 
@@ -174,7 +359,7 @@ Los nombres de rol reconocidos por el servicio son:
 
 Otros nombres funcionan, pero reciben un perfil generico con permisos basicos.
 
-## 5. Aplicar la migracion del asset
+## 6. Aplicar la migracion del asset
 
 Si ya se ejecuto `database/scripts/bootstrap_login_schema.sql`, la tabla `academico.auth_sessions` ya fue creada. Esta migracion puede ejecutarse igual porque es idempotente.
 
@@ -194,7 +379,7 @@ Esta migracion crea `academico.auth_sessions`, usada para:
 
 La tabla `auth_sessions` es recomendable. Si no existe, el login sigue emitiendo tokens, pero el servicio pierde persistencia de sesiones del lado servidor.
 
-## 6. Crear usuarios
+## 7. Crear usuarios
 
 `password_hash` acepta:
 
@@ -242,7 +427,7 @@ ON CONFLICT (email) DO UPDATE SET
 
 El repositorio tambien incluye `seed_user.cjs`, pero ese script crea usuarios con contraseña en texto plano para arranque rapido. No usarlo como patron de produccion.
 
-## 7. Levantar el servicio en desarrollo
+## 8. Levantar el servicio en desarrollo
 
 Instalar dependencias:
 
@@ -268,7 +453,7 @@ El servicio queda escuchando en:
 http://localhost:3001
 ```
 
-## 8. Levantar el servicio con Docker
+## 9. Levantar el servicio con Docker
 
 Construir y ejecutar:
 
@@ -292,7 +477,7 @@ El `docker-compose.yml` publica el puerto `3001:3001` y carga variables desde `.
 
 Si la base de datos no corre dentro del mismo `docker-compose.yml`, `DB_HOST` debe ser alcanzable desde el contenedor. Usar el nombre del servicio cuando la base este en la misma red Docker, o el host/IP real cuando sea externa.
 
-## 9. Verificar build y pruebas
+## 10. Verificar build y pruebas
 
 Con Docker, validar que la imagen compile correctamente:
 
@@ -314,7 +499,7 @@ npm test
 npm run build
 ```
 
-## 10. Validar funcionamiento
+## 11. Validar funcionamiento
 
 Health check:
 
@@ -374,7 +559,7 @@ curl -X POST http://localhost:3001/api/v1/auth/logout \
   -d '{"refreshToken":"<refreshToken>"}'
 ```
 
-## 11. Integrar con una base de datos PostgreSQL existente
+## 12. Integrar con una base de datos PostgreSQL existente
 
 Si la base existente ya tiene usuarios, hay dos caminos.
 
@@ -433,7 +618,7 @@ Modificar `findActiveUser` en `src/auth/auth.service.js` para leer las tablas re
 
 Si se conservan esos alias, el resto del flujo de JWT y sesiones no necesita cambios.
 
-## 12. Integrar con otro motor de base de datos
+## 13. Integrar con otro motor de base de datos
 
 Para un motor diferente a PostgreSQL, crear una capa de acceso equivalente:
 
@@ -460,7 +645,7 @@ Contrato minimo que debe devolver la consulta de usuario:
 
 Mientras ese contrato se cumpla, el servicio puede seguir generando el mismo payload JWT.
 
-## 13. Integrar consumidores
+## 14. Integrar consumidores
 
 Los consumidores REST deben enviar:
 
@@ -481,7 +666,7 @@ Endpoints REST principales:
 
 El servicio tambien expone contratos ConnectRPC/gRPC definidos en `proto/auth.proto`.
 
-## 14. Checklist de despliegue
+## 15. Checklist de despliegue
 
 - `.env` creado y cargado.
 - `LOGIN_API_KEY` configurada y compartida solo con consumidores internos.
