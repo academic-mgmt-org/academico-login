@@ -8,6 +8,14 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import getPool from '../db';
+import {
+  LoginRequestDto,
+  LoginResponseDto,
+  LogoutRequestDto,
+  LogoutResponseDto,
+  RefreshTokenRequestDto,
+  ValidateTokenResponseDto,
+} from './dto/auth.dto';
 
 const AUTH_ERROR_MESSAGE =
   'Usuario o contraseña incorrectos. Verifique sus credenciales.';
@@ -22,7 +30,9 @@ export class AuthService {
   }
 
   async login(loginRequest, requestContext = {}) {
-    const credentials = this.normalizeLoginRequest(loginRequest);
+    const credentials = this.normalizeLoginRequest(
+      LoginRequestDto.from(loginRequest),
+    );
     const pool = getPool();
     const userRow = await this.findActiveUser(pool, credentials.username);
 
@@ -67,7 +77,7 @@ export class AuthService {
       ipAddress: requestContext.ipAddress,
     });
 
-    return {
+    return LoginResponseDto.from({
       accessToken,
       refreshToken,
       tokenType: 'Bearer',
@@ -75,13 +85,11 @@ export class AuthService {
       sessionId,
       mfaRequired: false,
       requiresAppUpdate: false,
-    };
+    });
   }
 
-  async refresh(refreshToken) {
-    if (!refreshToken) {
-      throw new BadRequestException('Refresh token es requerido');
-    }
+  async refresh(refreshTokenRequest) {
+    const { refreshToken } = RefreshTokenRequestDto.from(refreshTokenRequest);
 
     let refreshPayload;
     try {
@@ -116,7 +124,7 @@ export class AuthService {
 
     await this.touchSession(pool, refreshPayload.sessionId);
 
-    return {
+    return LoginResponseDto.from({
       accessToken,
       refreshToken,
       tokenType: 'Bearer',
@@ -124,14 +132,14 @@ export class AuthService {
       sessionId: refreshPayload.sessionId,
       mfaRequired: false,
       requiresAppUpdate: false,
-    };
+    });
   }
 
   async logout(logoutRequest = {}, authorization) {
+    const logoutDto = LogoutRequestDto.from(logoutRequest);
     const token =
-      logoutRequest.refreshToken ||
-      logoutRequest.refresh_token ||
-      logoutRequest.token ||
+      logoutDto.refreshToken ||
+      logoutDto.token ||
       this.extractBearerToken(authorization);
 
     if (!token) {
@@ -144,22 +152,22 @@ export class AuthService {
         secret: this.getJwtSecret(),
       });
     } catch (error) {
-      return {
+      return LogoutResponseDto.from({
         success: false,
         revoked: false,
         message: 'Token invalido o expirado',
-      };
+      });
     }
 
     if (payload.sessionId) {
       await this.revokeSession(getPool(), payload.sessionId);
     }
 
-    return {
+    return LogoutResponseDto.from({
       success: true,
       revoked: Boolean(payload.sessionId),
       message: 'Sesion cerrada correctamente',
-    };
+    });
   }
 
   async validateToken(token) {
@@ -175,7 +183,7 @@ export class AuthService {
     const tokenToVerify = this.extractBearerToken(authorization);
 
     if (!tokenToVerify) {
-      return { isValid: false };
+      return ValidateTokenResponseDto.from({ isValid: false });
     }
 
     try {
@@ -184,17 +192,17 @@ export class AuthService {
       });
 
       if (payload.tokenUse === 'refresh') {
-        return { isValid: false };
+        return ValidateTokenResponseDto.from({ isValid: false });
       }
 
       if (
         payload.sessionId &&
         (await this.isSessionRevoked(getPool(), payload.sessionId))
       ) {
-        return { isValid: false };
+        return ValidateTokenResponseDto.from({ isValid: false });
       }
 
-      return {
+      return ValidateTokenResponseDto.from({
         isValid: true,
         identifier: payload.identifier,
         email: payload.email,
@@ -202,9 +210,9 @@ export class AuthService {
         userId: payload.userId || payload.sub,
         role: payload.role,
         applications: payload.applications || [],
-      };
+      });
     } catch (error) {
-      return { isValid: false };
+      return ValidateTokenResponseDto.from({ isValid: false });
     }
   }
 

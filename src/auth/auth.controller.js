@@ -8,6 +8,16 @@ import {
   Inject,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import {
+  LoginRequestDto,
+  LoginResponseDto,
+  LogoutRequestDto,
+  LogoutResponseDto,
+  RefreshTokenRequestDto,
+  RequestContextDto,
+  ValidateTokenRequestDto,
+  ValidateTokenResponseDto,
+} from './dto/auth.dto';
 
 @Controller('api/v1/auth')
 export class AuthController {
@@ -18,45 +28,49 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginRequest, @Headers() headers) {
-    return this.authService.login(loginRequest, this.requestContext(headers));
+    const result = await this.authService.login(
+      LoginRequestDto.from(loginRequest),
+      this.requestContext(headers),
+    );
+    return LoginResponseDto.from(result);
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(@Body() body) {
-    const refreshToken = body?.refreshToken || body?.refresh_token;
-    return this.authService.refresh(refreshToken);
+    const result = await this.authService.refresh(
+      RefreshTokenRequestDto.from(body),
+    );
+    return LoginResponseDto.from(result);
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(@Body() body, @Headers() headers) {
-    return this.authService.logout(body, headers['authorization']);
+    const result = await this.authService.logout(
+      LogoutRequestDto.from(body),
+      headers['authorization'],
+    );
+    return LogoutResponseDto.from(result);
   }
 
   @Post('validate-token')
   @HttpCode(HttpStatus.OK)
-  async validateToken(@Body('token') token) {
-    const isValid = await this.authService.validateToken(token);
-    return { isValid };
+  async validateToken(@Body() body) {
+    const tokenRequest = ValidateTokenRequestDto.from(body);
+    const isValid = await this.authService.validateToken(tokenRequest.token);
+    return ValidateTokenResponseDto.from({ isValid });
   }
 
   @Post('validate-token-2')
   @HttpCode(HttpStatus.OK)
   async validateTokenWithHeader(@Headers() headers) {
     const authorization = headers['authorization'];
-    return this.authService.validateToken2(authorization);
+    const result = await this.authService.validateToken2(authorization);
+    return ValidateTokenResponseDto.from(result);
   }
 
   requestContext(headers) {
-    const forwardedFor = headers['x-forwarded-for'];
-    const ipAddress = forwardedFor
-      ? String(forwardedFor).split(',')[0].trim()
-      : headers['x-real-ip'];
-
-    return {
-      ipAddress,
-      userAgent: headers['user-agent'],
-    };
+    return RequestContextDto.fromHeaders(headers);
   }
 }

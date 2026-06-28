@@ -3,6 +3,12 @@ import { AuthService as AuthDomainService } from './auth/auth.service.js';
 import { ConnectError, Code } from '@connectrpc/connect';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import {
+  LoginRequestDto,
+  LogoutRequestDto,
+  RefreshTokenRequestDto,
+  ValidateTokenRequestDto,
+} from './auth/dto/auth.dto.js';
 
 function toConnectError(err) {
   let code = Code.Internal;
@@ -54,12 +60,14 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
   router.service(AuthRpcService, {
     async login(req) {
       try {
-        const result = await authService.login({
-          username: req.username,
-          password: req.password,
-          appVersion: req.appVersion,
-          passwordEncoding: req.passwordEncoding,
-        });
+        const result = await authService.login(
+          LoginRequestDto.from({
+            username: req.username,
+            password: req.password,
+            appVersion: req.appVersion,
+            passwordEncoding: req.passwordEncoding,
+          }),
+        );
         return toLoginResponse(result);
       } catch (err) {
         throw toConnectError(err);
@@ -68,7 +76,9 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
 
     async refreshToken(req) {
       try {
-        const result = await authService.refresh(req.refreshToken);
+        const result = await authService.refresh(
+          RefreshTokenRequestDto.from(req),
+        );
         return toLoginResponse(result);
       } catch (err) {
         throw toConnectError(err);
@@ -77,7 +87,8 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
 
     async validateToken(req) {
       try {
-        const validation = await authService.validateToken2(req.token);
+        const tokenRequest = ValidateTokenRequestDto.from(req);
+        const validation = await authService.validateToken2(tokenRequest.token);
         return {
           isValid: validation.isValid,
           identifier: validation.identifier || '',
@@ -93,10 +104,12 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
 
     async logout(req) {
       try {
-        const result = await authService.logout({
-          token: req.token,
-          refreshToken: req.refreshToken,
-        });
+        const result = await authService.logout(
+          LogoutRequestDto.from({
+            token: req.token,
+            refreshToken: req.refreshToken,
+          }),
+        );
         return {
           success: result.success,
           message: result.message,
