@@ -246,6 +246,37 @@ stages:
 
         cd "$REMOTE_APP_PATH"
 
+        container_is_running() {
+          docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"
+        }
+
+        show_port_usage() {
+          local service_port=""
+          if [ -f .env ]; then
+            service_port="$(sed -n 's/^PORT=//p' .env | tail -n 1 || true)"
+          fi
+
+          if [ -n "$service_port" ]; then
+            echo "Containers publishing port $service_port:"
+            docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}' | awk -v port="$service_port" 'NR == 1 || index($0, ":" port "->") > 0'
+          fi
+        }
+
+        start_compose() {
+          local compose_file="$1"
+          if ! docker compose -f "$compose_file" up -d --remove-orphans; then
+            echo "Docker Compose reported a startup error. Waiting before checking container state..."
+            sleep 8
+            if container_is_running; then
+              echo "Container $CONTAINER_NAME is running after the startup error; continuing."
+              return 0
+            fi
+
+            show_port_usage
+            return 1
+          fi
+        }
+
         if [ -f docker-compose.yml ]; then
           echo "Stopping current compose project..."
           docker compose -f docker-compose.yml down --remove-orphans || true
@@ -258,12 +289,13 @@ stages:
         docker compose -f "$DEV_COMPOSE_FILE" pull
 
         echo "Starting development compose project..."
-        docker compose -f "$DEV_COMPOSE_FILE" up -d --remove-orphans
+        start_compose "$DEV_COMPOSE_FILE"
 
         echo "Verifying container is running..."
         sleep 8
-        if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+        if ! container_is_running; then
           echo "Container $CONTAINER_NAME did not stay running."
+          show_port_usage
           docker ps -a --filter "name=^/${CONTAINER_NAME}$"
           docker logs --tail 200 "$CONTAINER_NAME" || true
           exit 1
@@ -286,7 +318,7 @@ stages:
         COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/${{ parameters.devComposeFile }}
         IMAGE_ENV_VARIABLE_NAME: ${{ parameters.imageEnvVariableName }}
         ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
-        DEFAULT_SERVICE_PORT: ${{ parameters.servicePort }}
+        DEFAULT_SERVICE_PORT: '${{ parameters.servicePort }}'
         ${{ each envVar in parameters.envVariables }}:
           ${{ envVar.key }}: ${{ envVar.value }}
 
@@ -422,6 +454,37 @@ stages:
 
         cd "$REMOTE_APP_PATH"
 
+        container_is_running() {
+          docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"
+        }
+
+        show_port_usage() {
+          local service_port=""
+          if [ -f .env ]; then
+            service_port="$(sed -n 's/^PORT=//p' .env | tail -n 1 || true)"
+          fi
+
+          if [ -n "$service_port" ]; then
+            echo "Containers publishing port $service_port:"
+            docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}' | awk -v port="$service_port" 'NR == 1 || index($0, ":" port "->") > 0'
+          fi
+        }
+
+        start_compose() {
+          local compose_file="$1"
+          if ! docker compose -f "$compose_file" up -d --remove-orphans; then
+            echo "Docker Compose reported a startup error. Waiting before checking container state..."
+            sleep 8
+            if container_is_running; then
+              echo "Container $CONTAINER_NAME is running after the startup error; continuing."
+              return 0
+            fi
+
+            show_port_usage
+            return 1
+          fi
+        }
+
         if [ -f docker-compose.yml ]; then
           echo "Stopping current compose project..."
           docker compose -f docker-compose.yml down --remove-orphans || true
@@ -434,12 +497,13 @@ stages:
         docker compose -f "$PROD_COMPOSE_FILE" pull
 
         echo "Starting production compose project..."
-        docker compose -f "$PROD_COMPOSE_FILE" up -d --remove-orphans
+        start_compose "$PROD_COMPOSE_FILE"
 
         echo "Verifying container is running..."
         sleep 8
-        if ! docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+        if ! container_is_running; then
           echo "Container $CONTAINER_NAME did not stay running."
+          show_port_usage
           docker ps -a --filter "name=^/${CONTAINER_NAME}$"
           docker logs --tail 200 "$CONTAINER_NAME" || true
           exit 1
@@ -465,7 +529,7 @@ stages:
         COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/${{ parameters.prodComposeFile }}
         IMAGE_ENV_VARIABLE_NAME: ${{ parameters.imageEnvVariableName }}
         ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
-        DEFAULT_SERVICE_PORT: ${{ parameters.servicePort }}
+        DEFAULT_SERVICE_PORT: '${{ parameters.servicePort }}'
         PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
         ${{ each envVar in parameters.envVariables }}:
           ${{ envVar.key }}: ${{ envVar.value }}
