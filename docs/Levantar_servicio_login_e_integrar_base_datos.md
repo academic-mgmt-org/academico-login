@@ -209,7 +209,7 @@ Ejemplo recomendado con bcrypt desde Node:
 node -e "const bcrypt=require('bcryptjs'); bcrypt.hash('password123', 10).then(console.log)"
 ```
 
-Insertar usuario de prueba:
+Insertar otro usuario de prueba manualmente:
 
 ```sql
 INSERT INTO academico.usuarios (
@@ -329,7 +329,7 @@ curl -X POST http://localhost:3001/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -H "x-api-key: $LOGIN_API_KEY" \
   -d '{
-    "username": "usuario@demo.com",
+    "username": "estudiante@demo.com",
     "password": "password123"
   }'
 ```
