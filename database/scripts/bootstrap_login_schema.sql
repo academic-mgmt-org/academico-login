@@ -149,8 +149,7 @@ ON CONFLICT (email) DO UPDATE SET
   apellidos = EXCLUDED.apellidos,
   password_hash = EXCLUDED.password_hash,
   identificacion = EXCLUDED.identificacion,
-  estado = EXCLUDED.estado,
-  updated_at = NOW();
+  estado = EXCLUDED.estado;
 
 COMMENT ON TABLE academico.roles IS
   'Roles academicos usados por academico-login para construir el perfil del JWT.';
