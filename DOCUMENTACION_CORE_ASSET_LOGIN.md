@@ -198,6 +198,147 @@ Rutas públicas expuestas al Gateway:
 
 # 7. Modelo de Datos
 
+## Ejemplo mínimo para arranque con `academico.usuarios` y `academico.roles`
+
+Para que el servicio de login entre en funcionamiento, las únicas tablas obligatorias son:
+
+```text
+academico.roles
+academico.usuarios
+```
+
+`academico.auth_sessions` es recomendable para persistir sesiones, revocación y trazabilidad, pero no es obligatoria para un arranque mínimo. Si la tabla no existe, el servicio sigue emitiendo `accessToken` y `refreshToken`; simplemente no tendrá persistencia de sesiones del lado servidor.
+
+El servicio consulta los usuarios con el siguiente contrato lógico:
+
+```sql
+SELECT
+  u.id AS usuario_id,
+  u.nombres,
+  u.apellidos,
+  u.email,
+  u.password_hash,
+  u.identificacion,
+  u.estado,
+  COALESCE(r.nombre, 'usuario') AS rol_nombre
+FROM academico.usuarios u
+INNER JOIN academico.roles r ON r.id = u.rol_id
+WHERE LOWER(u.email) = $1
+  AND LOWER(u.estado) = 'activo'
+LIMIT 1;
+```
+
+Por tanto, el esquema mínimo debe exponer estas columnas:
+
+|Tabla|Columnas mínimas requeridas|
+|---|---|
+|`academico.roles`|`id`, `nombre`|
+|`academico.usuarios`|`id`, `rol_id`, `nombres`, `apellidos`, `email`, `password_hash`, `identificacion`, `estado`|
+
+Ejemplo SQL mínimo:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS academico;
+
+CREATE TABLE IF NOT EXISTS academico.roles (
+  id BIGSERIAL PRIMARY KEY,
+  nombre VARCHAR(80) NOT NULL UNIQUE,
+  descripcion TEXT
+);
+
+CREATE TABLE IF NOT EXISTS academico.usuarios (
+  id BIGSERIAL PRIMARY KEY,
+  rol_id BIGINT NOT NULL REFERENCES academico.roles(id),
+  nombres VARCHAR(120) NOT NULL,
+  apellidos VARCHAR(120) NOT NULL,
+  email VARCHAR(150) NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  identificacion VARCHAR(30),
+  estado VARCHAR(20) NOT NULL DEFAULT 'activo',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usuarios_email_lower
+  ON academico.usuarios (LOWER(email));
+
+CREATE INDEX IF NOT EXISTS idx_usuarios_estado_lower
+  ON academico.usuarios (LOWER(estado));
+```
+
+Semilla mínima para probar login:
+
+```sql
+INSERT INTO academico.roles (nombre, descripcion)
+VALUES
+  ('estudiante', 'Rol de estudiante'),
+  ('docente', 'Rol de docente'),
+  ('administrador', 'Rol de administrador')
+ON CONFLICT (nombre) DO NOTHING;
+
+INSERT INTO academico.usuarios (
+  rol_id,
+  nombres,
+  apellidos,
+  email,
+  password_hash,
+  identificacion,
+  estado
+)
+SELECT
+  r.id,
+  'Estudiante',
+  'Prueba',
+  'estudiante@utn.edu.ec',
+  'password123',
+  '1000000001',
+  'activo'
+FROM academico.roles r
+WHERE r.nombre = 'estudiante'
+ON CONFLICT (email) DO UPDATE SET
+  rol_id = EXCLUDED.rol_id,
+  nombres = EXCLUDED.nombres,
+  apellidos = EXCLUDED.apellidos,
+  password_hash = EXCLUDED.password_hash,
+  identificacion = EXCLUDED.identificacion,
+  estado = EXCLUDED.estado,
+  updated_at = NOW();
+```
+
+Con esa semilla, la autenticación mínima puede probarse así:
+
+```bash
+curl --http2-prior-knowledge \
+  -X POST http://localhost:3001/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{
+    "username": "estudiante@utn.edu.ec",
+    "password": "password123"
+  }'
+```
+
+También se puede enviar la contraseña en Base64:
+
+```bash
+curl --http2-prior-knowledge \
+  -X POST http://localhost:3001/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{
+    "username": "estudiante@utn.edu.ec",
+    "password": "cGFzc3dvcmQxMjM=",
+    "passwordEncoding": "base64"
+  }'
+```
+
+Notas operativas:
+
+- `email` se compara en minúsculas, por lo que se recomienda mantenerlo normalizado.
+- `estado` debe ser `activo`; cualquier otro estado impide el login.
+- `nombre` en `academico.roles` controla el perfil incluido en el JWT. Los valores reconocidos por defecto son `estudiante`, `docente`, `administrador` o `admin`.
+- `password_hash` acepta `bcrypt`, `sha256:<hash>`, SHA-256 hexadecimal y texto plano legacy. Para producción se recomienda `bcrypt`; el texto plano anterior solo existe para semillas mínimas o compatibilidad legacy.
+
+---
+
 ## auth_sessions
 
 ```sql
