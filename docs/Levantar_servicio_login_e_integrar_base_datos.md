@@ -500,31 +500,7 @@ else
 fi
 ```
 
-## 2. Ajustes necesarios encontrados durante la prueba
-
-Durante la prueba se encontraron dos problemas que debieron corregirse para que el flujo funcionara completo.
-
-### 2.1. Filtro global de excepciones con Fastify
-
-El servicio usa Fastify. El filtro global intentaba responder con:
-
-```js
-response.status(status).send(errorResponse);
-```
-
-Eso es estilo Express. En Fastify corresponde usar:
-
-```js
-response.code(status).send(errorResponse);
-```
-
-Se ajusto `src/filters/http-exception.filter.js` en `https://github.com/academic-mgmt-org/academico-login.git` para soportar ambos casos.
-
-### 2.2. Bootstrap compatible con `academico-esquema-bd`
-
-El script `database/scripts/bootstrap_login_schema.sql` en `https://github.com/academic-mgmt-org/academico-login.git` usaba `updated_at` en el `ON CONFLICT`. El esquema simplificado de `academico-esquema-bd` usa `actualizado_en`, por lo que se elimino esa asignacion del conflicto para hacerlo compatible.
-
-## 3. Valores locales usados en `.env`
+## 2. Valores locales usados en `.env`
 
 Cuando `academico-login` corre dentro de Docker y la base viene del repositorio `https://dev.azure.com/fabrica-utn/academico-estudiantes/_git/academico-esquema-bd`, usar:
 
@@ -545,7 +521,7 @@ DB_PASSWORD=academic_password
 
 Si `academico-login` corre directamente en el host, `DB_HOST` debe ser `localhost`. Si corre en Docker, `DB_HOST` debe ser `academic-postgres-db` y el contenedor debe estar conectado a la red `academico-esquema-bd_default`.
 
-## 4. Comandos rapidos para una nueva prueba local
+## 3. Comandos rapidos para una nueva prueba local
 
 Esta es la version corta del flujo completo.
 
