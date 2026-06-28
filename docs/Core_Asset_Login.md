@@ -78,7 +78,7 @@ Cliente consumidor
 (web, móvil, backend, gateway)
       │
       ▼
-academico-web / academico-gateway
+academico-gateway / backend integrador (opcional)
       │
       │ solicita login, refresh, validate-token o whitelist
       ▼
