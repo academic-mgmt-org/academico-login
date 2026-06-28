@@ -658,7 +658,7 @@ Autenticación y Sesiones
 Historia:
 
 ```text
-US-501 Implementar Core Asset Login
+US-5 Implementar Core Asset Login
 ```
 
 ---
@@ -682,7 +682,7 @@ Validación de contenedor y healthcheck
 ## Commit
 
 ```bash
-git commit -m "feat(login): completar core asset de autenticacion AB#501"
+git commit -m "feat(login): completar core asset de autenticacion AB#26"
 ```
 
 ---
@@ -692,7 +692,7 @@ git commit -m "feat(login): completar core asset de autenticacion AB#501"
 ```text
 Implementación Core Asset Login
 
-Fixes AB#501
+Fixes AB#26
 ```
 
 ---
