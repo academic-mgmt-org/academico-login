@@ -59,25 +59,49 @@ Este servicio será responsable de:
 
 # 4. Ubicación en la Arquitectura
 
+El `Authentication Service` no administra el Gateway ni administra usuarios. Su responsabilidad es autenticar y mantener sesiones.
+
 ```text
-                    Authentication Service
-
-                              │
-
-                 ┌─────────────────────────┐
-                 │ Login, JWT y Sesiones   │
-                 └─────────────────────────┘
-
-                              │
-
-           ┌───────────────┬───────────────┬───────────────┐
-           │               │               │
-           ▼               ▼               ▼
-
-       Gateway       User Management       Audit
+Authentication Service
+│
+├── Login
+├── Emisión y validación de JWT
+├── Refresh token
+├── Logout
+└── Sesiones en academico.auth_sessions
 ```
 
-El servicio es la autoridad de autenticación. El ciclo de vida maestro del usuario sigue perteneciendo al Core Asset de Gestión de Usuarios.
+Sus conexiones con el resto de la plataforma son integraciones:
+
+```text
+Cliente consumidor
+(web, móvil, backend, gateway)
+      │
+      ▼
+academico-web / academico-gateway
+      │
+      │ solicita login, refresh, validate-token o whitelist
+      ▼
+Authentication Service
+      │
+      ├── Lee usuarios activos, roles y password_hash
+      │       desde academico.usuarios y academico.roles
+      │
+      ├── Crea, consulta o revoca sesiones
+      │       en academico.auth_sessions
+      │
+      └── Devuelve tokens e identidad validada
+              al Gateway o cliente integrador
+```
+
+Lectura correcta de las conexiones:
+
+- `Gateway`: consume el servicio de autenticación. No es gestionado por `academico-login`.
+- `Tablas de Usuario`: son fuente de datos para validar credenciales, estado y rol. `academico-login` no crea ni modifica usuarios.
+- `academico.auth_sessions`: sí es gestionada por `academico-login`, porque forma parte del ciclo de sesión.
+- `Audit`: representa una integración futura o complementaria para eventos de auditoría; no forma parte obligatoria del flujo actual.
+
+El servicio es la autoridad de autenticación. El ciclo de vida maestro del usuario no está implementado en este asset; permanece en el Core Asset de Gestión de Usuarios o en el modelo de datos existente. Para autenticar, este servicio consulta las tablas `academico.usuarios` y `academico.roles`.
 
 ---
 
@@ -394,15 +418,13 @@ Consume:
 
 ---
 
-## User Management Service
+## Fuente de Usuarios Existente
 
-Fuente de:
+Este asset no implementa creación, actualización ni administración de usuarios. Para el login consume la información existente en base de datos:
 
 ```text
-Usuario
-Estado
-Rol
-Identificación
+academico.usuarios
+academico.roles
 ```
 
 ---
@@ -581,12 +603,14 @@ Core Assets
 
 ├── Authentication Service
 ├── Authorization Service
-├── User Management Service
+├── Gestión de Usuarios
 ├── Audit Service
 ├── Notification Service
 ├── File Service
 └── Reporting Service
 ```
+
+`Gestión de Usuarios` se muestra como Core Asset complementario de la plataforma, no como funcionalidad implementada dentro de `academico-login`.
 
 ## Flujo Integrado
 
@@ -597,7 +621,7 @@ Login Usuario
 
 Authentication Service
       │
-      ├── Valida credenciales contra User Management
+      ├── Valida credenciales contra academico.usuarios y academico.roles
       ├── Emite JWT
       ├── Registra sesión
       └── Publica identidad al Gateway
