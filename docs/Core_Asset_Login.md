@@ -666,15 +666,19 @@ US-5 Implementar Core Asset Login
 ## Pipeline
 
 ```text
-Build Docker
+Trigger en main
 ↓
-Publicar imagen en ACR
+Build Docker y publicar imagen en ACR
 ↓
-Aprobación manual
+Despliegue a desarrollo con Docker Compose
 ↓
-Despliegue con Docker Compose
+Validación de contenedor en ejecución
 ↓
-Validación de contenedor y healthcheck
+Aprobación manual para producción
+↓
+Despliegue a producción con Docker Compose
+↓
+Validación de contenedor en ejecución
 ```
 
 ---
