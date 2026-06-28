@@ -1,110 +1,100 @@
-# Levantar el servicio de login e integrarlo con una base de datos
+# Prueba local de integracion: base de datos + servicio de login
 
-Esta guia describe los pasos operativos para ejecutar `academico-login` y conectarlo a una base de datos existente o nueva.
+Este documento contiene primero los comandos usados para validar localmente la integracion entre:
 
-## 1. Alcance real del servicio
+- base de datos PostgreSQL levantada desde `/home/azureuser/academico-esquema-bd`;
+- servicio `academico-login` levantado desde `/home/azureuser/academico-login`;
+- Docker Compose en ambos repositorios;
+- conexion SSL entre login y PostgreSQL;
+- endpoints REST principales del servicio de login.
 
-`academico-login` es un microservicio NestJS que:
+## 1. Comandos exactos usados en la prueba local
 
-- valida credenciales contra tablas de usuarios y roles;
-- emite `accessToken` y `refreshToken` JWT;
-- valida tokens para clientes internos o gateway;
-- renueva y revoca sesiones;
-- protege sus endpoints con `LOGIN_API_KEY`;
-- registra sesiones en `academico.auth_sessions` cuando la migracion del asset fue aplicada.
-
-El codigo actual usa el paquete `pg`, por lo que soporta PostgreSQL de forma directa. Para usar otro motor, como MySQL, SQL Server, Oracle o MongoDB, se debe reemplazar la capa de acceso a datos descrita en la seccion "Integrar con otro motor de base de datos".
-
-## 2. Prerrequisitos
-
-Para levantar el servicio con Docker:
-
-- Docker.
-- Docker Compose.
-- Acceso a una base de datos PostgreSQL o a un motor alternativo con una adaptacion de repositorio.
-- Variables de entorno configuradas en `.env`.
-- Puerto disponible para el servicio. Por defecto se usa `3001`.
-
-No es necesario instalar Node.js ni `npm` en el host si se usa Docker. El `Dockerfile` usa `node:22.13.0-slim` para instalar dependencias, compilar y ejecutar la aplicacion dentro del contenedor.
-
-## 3. Variables de entorno
-
-Crear el archivo `.env` desde `.env.example` si aun no existe:
+### 1.1. Guardar el `.env` original del login
 
 ```bash
-cp -n .env.example .env
+cd /home/azureuser/academico-login
+cp -p .env /tmp/academico-login.env.before-local-test
 ```
 
-Configurar al menos:
+### 1.2. Configurar temporalmente el `.env` local del login
+
+Durante la prueba se reemplazo temporalmente `/home/azureuser/academico-login/.env` por estos valores:
 
 ```env
 PORT=3001
-NODE_ENV=development
-LOGIN_API_KEY=valor-interno-seguro
-JWT_SECRET=valor-jwt-seguro
-JWT_DOC_SECRET=valor-jwt-doc-opcional
+NODE_ENV=production
+LOGIN_API_KEY=local-login-api-key
+JWT_SECRET=local-jwt-secret
+JWT_DOC_SECRET=local-jwt-secret
 JWT_ACCESS_TTL=2h
 JWT_REFRESH_TTL=7d
-DB_HOST=host-de-la-base
+DB_HOST=academic-postgres-db
 DB_PORT=5432
-DB_DATABASE=nombre_base
-DB_USER=usuario_base
-DB_PASSWORD=password_base
+DB_DATABASE=academic_management_db
+DB_USER=academic_user
+DB_PASSWORD=academic_password
 ```
 
-Notas:
-
-- `LOGIN_API_KEY` es obligatoria. Todas las rutas REST, excepto health checks, requieren el header `x-api-key`.
-- `JWT_SECRET` debe ser el mismo para todos los consumidores que necesiten validar tokens localmente.
-- `JWT_ACCESS_TTL` y `JWT_REFRESH_TTL` aceptan valores como `30m`, `2h` o `7d`.
-- La conexion actual en `src/db.js` usa SSL con `rejectUnauthorized: false`. Si la base de datos no soporta SSL, se debe ajustar esa configuracion antes de levantar el servicio.
-- Para usar las variables del `.env` en comandos de terminal, cargarlas con:
+Comando equivalente para escribir ese archivo:
 
 ```bash
-set -a
-source .env
-set +a
+cd /home/azureuser/academico-login
+cat > .env <<'EOF'
+PORT=3001
+NODE_ENV=production
+LOGIN_API_KEY=local-login-api-key
+JWT_SECRET=local-jwt-secret
+JWT_DOC_SECRET=local-jwt-secret
+JWT_ACCESS_TTL=2h
+JWT_REFRESH_TTL=7d
+DB_HOST=academic-postgres-db
+DB_PORT=5432
+DB_DATABASE=academic_management_db
+DB_USER=academic_user
+DB_PASSWORD=academic_password
+EOF
 ```
 
-## 4. Flujo local con `academico-esquema-bd` y Docker Compose
-
-Usar este flujo cuando:
-
-- la base de datos se levanta desde `/home/azureuser/academico-esquema-bd`;
-- `academico-login` se levanta con el `docker-compose.yml` de `/home/azureuser/academico-login`;
-- ambos servicios corren en Docker, pero en Compose separados.
-
-### 4.1. Levantar PostgreSQL local con SSL
-
-Desde el repositorio de esquema:
+### 1.3. Levantar la base local desde `academico-esquema-bd`
 
 ```bash
 cd /home/azureuser/academico-esquema-bd
 docker compose up -d --build
 ```
 
-Verificar que PostgreSQL esta activo y con SSL:
+### 1.4. Verificar que PostgreSQL tenga SSL activo
 
 ```bash
+cd /home/azureuser/academico-esquema-bd
+
+set -e
+for i in $(seq 1 60); do
+  if docker exec academic-postgres-db pg_isready -U academic_user -d academic_management_db >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+  if [ "$i" = "60" ]; then
+    docker logs academic-postgres-db
+    exit 1
+  fi
+done
+
 docker exec academic-postgres-db \
-  psql -U academic_user -d academic_management_db -c "SHOW ssl;"
+  psql -U academic_user -d academic_management_db -Atc "SHOW ssl;"
 ```
 
-Debe responder:
+Resultado esperado:
 
 ```text
- ssl
------
- on
+on
 ```
 
-### 4.2. Aplicar el esquema compatible con `academico-login`
+### 1.5. Aplicar migraciones `V2` en adelante del esquema academico
 
-El Compose de `academico-esquema-bd` monta automaticamente `migrations/V1__init_schema.sql` cuando el volumen esta vacio. Para `academico-login` se necesita el esquema simplificado que queda despues de aplicar `V2` y las migraciones posteriores.
+Este paso deja `academico.usuarios` y `academico.roles` con las columnas esperadas por `academico-login`.
 
-Este paso es para una base local de pruebas. `V2__simplificar_esquema.sql` elimina y recrea tablas del esquema academico; no ejecutarlo sobre una base con datos que se deban conservar.
-
-Aplicar `V2` en adelante con un cliente PostgreSQL temporal en Docker:
+Advertencia: `V2__simplificar_esquema.sql` elimina y recrea tablas. Usar solo en base local de pruebas o en una base que se pueda reinicializar.
 
 ```bash
 cd /home/azureuser/academico-esquema-bd
@@ -132,18 +122,52 @@ docker run --rm \
   '
 ```
 
-Al terminar, validar que las tablas tienen las columnas esperadas:
+### 1.6. Si el contenedor de base desaparece, recrearlo
+
+Durante la prueba el volumen quedo disponible, pero el contenedor no estaba presente al validar. Se recreo con:
+
+```bash
+cd /home/azureuser/academico-esquema-bd
+docker compose up -d --build
+```
+
+### 1.7. Verificar columnas y tablas requeridas por login
 
 ```bash
 docker exec academic-postgres-db \
-  psql -U academic_user -d academic_management_db -c "\d academico.usuarios"
+  psql -U academic_user -d academic_management_db -Atc \
+  "SELECT column_name FROM information_schema.columns WHERE table_schema='academico' AND table_name='usuarios' ORDER BY ordinal_position;"
 ```
 
-La tabla debe exponer columnas como `id`, `rol_id`, `nombres`, `apellidos`, `email`, `password_hash`, `identificacion` y `estado`.
+Columnas esperadas, entre otras:
 
-### 4.3. Crear sesiones y usuarios de prueba para login
+```text
+id
+rol_id
+nombres
+apellidos
+email
+password_hash
+identificacion
+estado
+```
 
-Desde el repositorio de login, ejecutar el bootstrap contra la base local:
+Verificar tablas principales:
+
+```bash
+docker exec academic-postgres-db \
+  psql -U academic_user -d academic_management_db -Atc \
+  "SELECT table_name FROM information_schema.tables WHERE table_schema='academico' AND table_name IN ('usuarios','roles','auth_sessions') ORDER BY table_name;"
+```
+
+Antes del bootstrap del login deben existir al menos:
+
+```text
+roles
+usuarios
+```
+
+### 1.8. Ejecutar bootstrap del login contra la base local
 
 ```bash
 cd /home/azureuser/academico-login
@@ -163,14 +187,14 @@ docker run --rm \
     -f database/scripts/bootstrap_login_schema.sql
 ```
 
-Este paso crea o actualiza:
+Este script crea o actualiza:
 
 - `academico.auth_sessions`;
 - indices usados por login;
 - roles base;
 - usuarios de prueba.
 
-Credenciales de prueba:
+Usuarios de prueba creados:
 
 | Usuario | Password | Rol |
 | --- | --- | --- |
@@ -178,9 +202,339 @@ Credenciales de prueba:
 | `docente@demo.com` | `password123` | `docente` |
 | `administrador@demo.com` | `admin123` | `administrador` |
 
-### 4.4. Configurar `/home/azureuser/academico-login/.env`
+### 1.9. Verificar bootstrap del login
 
-Como `academico-login` correra dentro de Docker, `DB_HOST` debe ser el nombre del contenedor de PostgreSQL, no `localhost`:
+```bash
+docker exec academic-postgres-db \
+  psql -U academic_user -d academic_management_db -Atc \
+  "SELECT table_name FROM information_schema.tables WHERE table_schema='academico' AND table_name IN ('usuarios','roles','auth_sessions') ORDER BY table_name;"
+```
+
+Resultado esperado:
+
+```text
+auth_sessions
+roles
+usuarios
+```
+
+Verificar usuarios:
+
+```bash
+docker exec academic-postgres-db \
+  psql -U academic_user -d academic_management_db -Atc \
+  "SELECT u.email || '|' || r.nombre || '|' || u.estado FROM academico.usuarios u JOIN academico.roles r ON r.id = u.rol_id ORDER BY u.email;"
+```
+
+Resultado esperado:
+
+```text
+administrador@demo.com|administrador|activo
+docente@demo.com|docente|activo
+estudiante@demo.com|estudiante|activo
+```
+
+### 1.10. Levantar `academico-login`
+
+```bash
+cd /home/azureuser/academico-login
+docker compose up -d --build
+```
+
+Si existe un contenedor previo con el mismo nombre y Docker devuelve conflicto:
+
+```bash
+docker rm -f academico-login
+cd /home/azureuser/academico-login
+docker compose up -d --build
+```
+
+### 1.11. Conectar `academico-login` a la red de la base local
+
+```bash
+cd /home/azureuser/academico-login
+
+docker network connect academico-esquema-bd_default academico-login 2>/dev/null || true
+```
+
+Verificar redes del contenedor:
+
+```bash
+docker inspect academico-login \
+  --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+```
+
+Resultado esperado:
+
+```text
+academico-esquema-bd_default academico-login_default
+```
+
+Verificar que el contenedor tenga el `DB_HOST` local:
+
+```bash
+docker exec academico-login sh -lc 'printf "%s\n" "$DB_HOST"'
+```
+
+Resultado esperado:
+
+```text
+academic-postgres-db
+```
+
+### 1.12. Verificar logs de arranque del login
+
+```bash
+docker logs --tail 80 academico-login
+```
+
+En la prueba se verifico que el servicio mapeara estas rutas:
+
+```text
+/api/health
+/api/ready
+/api/live
+/api/v1/auth/login
+/api/v1/auth/refresh
+/api/v1/auth/logout
+/api/v1/auth/validate-token
+/api/v1/auth/validate-token-2
+/api/v1/whitelist/all
+```
+
+### 1.13. Probar endpoints REST con HTTP/2 h2c
+
+El servicio Fastify esta levantado con `http2: true`, por lo que las pruebas REST se hicieron con:
+
+```bash
+curl --http2-prior-knowledge
+```
+
+Comando completo de validacion usado:
+
+```bash
+cd /home/azureuser/academico-login
+
+set -euo pipefail
+BASE_URL=http://localhost:3001
+API_KEY=local-login-api-key
+CURL_HTTP2=(curl --http2-prior-knowledge -sS)
+failures=0
+
+call() {
+  local response status body
+  response=$("${CURL_HTTP2[@]}" -w '\n%{http_code}' "$@")
+  status=${response##*$'\n'}
+  body=${response%$'\n'*}
+  printf '%s\n%s' "$status" "$body"
+}
+
+json_field() {
+  local field="$1"
+  node -e "const fs=require('fs'); const body=fs.readFileSync(0,'utf8'); const parsed=JSON.parse(body); const value=parsed['$field']; if (value === undefined || value === null) process.exit(2); if (typeof value === 'object') process.stdout.write(JSON.stringify(value)); else process.stdout.write(String(value));"
+}
+
+expect_status() {
+  local name="$1" expected="$2" status="$3" detail="${4:-}"
+  if [ "$status" = "$expected" ]; then
+    printf 'PASS %-32s status=%s %s\n' "$name" "$status" "$detail"
+  else
+    printf 'FAIL %-32s expected=%s got=%s %s\n' "$name" "$expected" "$status" "$detail"
+    failures=$((failures + 1))
+  fi
+}
+
+response=$(call "$BASE_URL/api/health")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+health_status=$(printf '%s' "$body" | json_field status)
+expect_status health 200 "$status" "status=$health_status"
+
+response=$(call "$BASE_URL/api/ready")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+ready=$(printf '%s' "$body" | json_field ready)
+expect_status ready 200 "$status" "ready=$ready"
+
+response=$(call "$BASE_URL/api/live")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+alive=$(printf '%s' "$body" | json_field alive)
+expect_status live 200 "$status" "alive=$alive"
+
+response=$(call -H "x-api-key: $API_KEY" "$BASE_URL/api/v1/whitelist/all")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+whitelist_count=$(printf '%s' "$body" | node -e "const fs=require('fs'); const parsed=JSON.parse(fs.readFileSync(0,'utf8')); process.stdout.write(String(parsed.length));")
+expect_status whitelist 200 "$status" "routes=$whitelist_count"
+
+response=$(call "$BASE_URL/api/v1/whitelist/all")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+error_code=$(printf '%s' "$body" | json_field error)
+expect_status whitelist_without_api_key 401 "$status" "error=$error_code"
+
+response=$(call -X POST "$BASE_URL/api/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: $API_KEY" \
+  -d '{"username":"estudiante@demo.com","password":"password123"}')
+login_status=$(printf '%s' "$response" | sed -n '1p')
+login_body=$(printf '%s' "$response" | sed '1d')
+access_token=$(printf '%s' "$login_body" | json_field accessToken)
+refresh_token=$(printf '%s' "$login_body" | json_field refreshToken)
+session_id=$(printf '%s' "$login_body" | json_field sessionId)
+expires_in=$(printf '%s' "$login_body" | json_field expiresIn)
+expect_status login 200 "$login_status" "session=$session_id expiresIn=$expires_in"
+
+response=$(call -X POST "$BASE_URL/api/v1/auth/validate-token" \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: $API_KEY" \
+  -d "{\"token\":\"$access_token\"}")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+is_valid=$(printf '%s' "$body" | json_field isValid)
+expect_status validate_token 200 "$status" "isValid=$is_valid"
+[ "$is_valid" = "true" ] || failures=$((failures + 1))
+
+response=$(call -X POST "$BASE_URL/api/v1/auth/validate-token-2" \
+  -H "x-api-key: $API_KEY" \
+  -H "Authorization: Bearer $access_token")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+is_valid=$(printf '%s' "$body" | json_field isValid)
+role=$(printf '%s' "$body" | json_field role)
+expect_status validate_token_2 200 "$status" "isValid=$is_valid role=$role"
+[ "$is_valid" = "true" ] || failures=$((failures + 1))
+
+response=$(call -X POST "$BASE_URL/api/v1/auth/refresh" \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: $API_KEY" \
+  -d "{\"refreshToken\":\"$refresh_token\"}")
+refresh_status=$(printf '%s' "$response" | sed -n '1p')
+refresh_body=$(printf '%s' "$response" | sed '1d')
+new_access_token=$(printf '%s' "$refresh_body" | json_field accessToken)
+refresh_session_id=$(printf '%s' "$refresh_body" | json_field sessionId)
+expect_status refresh 200 "$refresh_status" "session=$refresh_session_id"
+[ "$refresh_session_id" = "$session_id" ] || failures=$((failures + 1))
+
+response=$(call -X POST "$BASE_URL/api/v1/auth/logout" \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: $API_KEY" \
+  -d "{\"refreshToken\":\"$refresh_token\"}")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+success=$(printf '%s' "$body" | json_field success)
+revoked=$(printf '%s' "$body" | json_field revoked)
+expect_status logout 200 "$status" "success=$success revoked=$revoked"
+[ "$success" = "true" ] && [ "$revoked" = "true" ] || failures=$((failures + 1))
+
+response=$(call -X POST "$BASE_URL/api/v1/auth/validate-token-2" \
+  -H "x-api-key: $API_KEY" \
+  -H "Authorization: Bearer $new_access_token")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+is_valid_after_logout=$(printf '%s' "$body" | json_field isValid)
+expect_status validate_after_logout 200 "$status" "isValid=$is_valid_after_logout"
+[ "$is_valid_after_logout" = "false" ] || failures=$((failures + 1))
+
+response=$(call -X POST "$BASE_URL/api/v1/auth/refresh" \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: $API_KEY" \
+  -d "{\"refreshToken\":\"$refresh_token\"}")
+status=$(printf '%s' "$response" | sed -n '1p')
+body=$(printf '%s' "$response" | sed '1d')
+refresh_error=$(printf '%s' "$body" | json_field error)
+expect_status refresh_after_logout 401 "$status" "error=$refresh_error"
+
+db_session=$(docker exec academic-postgres-db psql -U academic_user -d academic_management_db -Atc "SELECT email || '|' || CASE WHEN revoked_at IS NULL THEN 'active' ELSE 'revoked' END FROM academico.auth_sessions WHERE session_id = '$session_id';")
+printf 'PASS %-32s %s\n' db_session "$db_session"
+case "$db_session" in
+  estudiante@demo.com\|revoked) ;;
+  *) failures=$((failures + 1)) ;;
+esac
+
+if [ "$failures" -ne 0 ]; then
+  printf 'FAILURES=%s\n' "$failures"
+  exit 1
+fi
+printf 'ALL_REST_ENDPOINT_CHECKS_PASSED\n'
+```
+
+Resultado obtenido en la prueba:
+
+```text
+PASS health                           status=200 status=healthy
+PASS ready                            status=200 ready=true
+PASS live                             status=200 alive=true
+PASS whitelist                        status=200 routes=2
+PASS whitelist_without_api_key        status=401 error=Unauthorized
+PASS login                            status=200 session=SESSION-... expiresIn=7200
+PASS validate_token                   status=200 isValid=true
+PASS validate_token_2                 status=200 isValid=true role=ESTUDIANTE
+PASS refresh                          status=200 session=SESSION-...
+PASS logout                           status=200 success=true revoked=true
+PASS validate_after_logout            status=200 isValid=false
+PASS refresh_after_logout             status=401 error=Unauthorized
+PASS db_session                       estudiante@demo.com|revoked
+ALL_REST_ENDPOINT_CHECKS_PASSED
+```
+
+### 1.14. Limpiar contenedores e imagenes creadas para la prueba
+
+```bash
+set -e
+
+cd /home/azureuser/academico-login
+docker compose down
+
+cd /home/azureuser/academico-esquema-bd
+docker compose down
+
+docker rmi academico-login:latest academico-postgres-ssl:15-alpine postgres:15-alpine || true
+
+dangling=$(docker images -f dangling=true -q | sort -u)
+if [ -n "$dangling" ]; then
+  docker rmi $dangling || true
+fi
+
+docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | sort
+```
+
+### 1.15. Restaurar el `.env` original del login
+
+```bash
+cd /home/azureuser/academico-login
+cp -p /tmp/academico-login.env.before-local-test .env
+rm -f /tmp/academico-login.env.before-local-test
+```
+
+## 2. Ajustes necesarios encontrados durante la prueba
+
+Durante la prueba se encontraron dos problemas que debieron corregirse para que el flujo funcionara completo.
+
+### 2.1. Filtro global de excepciones con Fastify
+
+El servicio usa Fastify. El filtro global intentaba responder con:
+
+```js
+response.status(status).send(errorResponse);
+```
+
+Eso es estilo Express. En Fastify corresponde usar:
+
+```js
+response.code(status).send(errorResponse);
+```
+
+Se ajusto [src/filters/http-exception.filter.js](/home/azureuser/academico-login/src/filters/http-exception.filter.js) para soportar ambos casos.
+
+### 2.2. Bootstrap compatible con `academico-esquema-bd`
+
+El script [database/scripts/bootstrap_login_schema.sql](/home/azureuser/academico-login/database/scripts/bootstrap_login_schema.sql) usaba `updated_at` en el `ON CONFLICT`. El esquema simplificado de `academico-esquema-bd` usa `actualizado_en`, por lo que se elimino esa asignacion del conflicto para hacerlo compatible.
+
+## 3. Valores locales usados en `.env`
+
+Cuando `academico-login` corre dentro de Docker y la base viene de `/home/azureuser/academico-esquema-bd`, usar:
 
 ```env
 PORT=3001
@@ -197,50 +551,67 @@ DB_USER=academic_user
 DB_PASSWORD=academic_password
 ```
 
-Si el servicio se ejecuta sin Docker desde el host, entonces `DB_HOST` debe ser `localhost`. Para el flujo con Docker Compose de `academico-login`, usar `academic-postgres-db`.
+Si `academico-login` corre directamente en el host, `DB_HOST` debe ser `localhost`. Si corre en Docker, `DB_HOST` debe ser `academic-postgres-db` y el contenedor debe estar conectado a la red `academico-esquema-bd_default`.
 
-### 4.5. Levantar `academico-login` y conectarlo a la red de la base
+## 4. Comandos rapidos para una nueva prueba local
 
-Desde el repositorio de login:
+Esta es la version corta del flujo completo.
 
 ```bash
 cd /home/azureuser/academico-login
+cp -p .env /tmp/academico-login.env.before-local-test
+cat > .env <<'EOF'
+PORT=3001
+NODE_ENV=production
+LOGIN_API_KEY=local-login-api-key
+JWT_SECRET=local-jwt-secret
+JWT_DOC_SECRET=local-jwt-secret
+JWT_ACCESS_TTL=2h
+JWT_REFRESH_TTL=7d
+DB_HOST=academic-postgres-db
+DB_PORT=5432
+DB_DATABASE=academic_management_db
+DB_USER=academic_user
+DB_PASSWORD=academic_password
+EOF
+
+cd /home/azureuser/academico-esquema-bd
 docker compose up -d --build
-```
 
-Como la base y el login estan en Compose separados, conectar el contenedor de login a la red del Compose de base de datos:
+docker run --rm \
+  --network academico-esquema-bd_default \
+  -v "$PWD":/work \
+  -w /work \
+  -e PGPASSWORD=academic_password \
+  -e PGSSLMODE=require \
+  postgres:15-alpine \
+  sh -lc '
+    for file in $(find migrations -name "V*__*.sql" | sort -V); do
+      case "$file" in
+        */V1__*) continue ;;
+      esac
+      psql -v ON_ERROR_STOP=1 -h academic-postgres-db -p 5432 -U academic_user -d academic_management_db -f "$file"
+    done
+  '
 
-```bash
+cd /home/azureuser/academico-login
+docker run --rm \
+  --network academico-esquema-bd_default \
+  -v "$PWD":/work \
+  -w /work \
+  -e PGPASSWORD=academic_password \
+  -e PGSSLMODE=require \
+  postgres:15-alpine \
+  psql -v ON_ERROR_STOP=1 -h academic-postgres-db -p 5432 -U academic_user -d academic_management_db -f database/scripts/bootstrap_login_schema.sql
+
+docker compose up -d --build
 docker network connect academico-esquema-bd_default academico-login 2>/dev/null || true
 ```
 
-Este comando debe repetirse si el contenedor `academico-login` se elimina y se crea de nuevo. Para dejarlo permanente, se puede agregar una red externa en el `docker-compose.yml` del login:
-
-```yaml
-services:
-  academico-login:
-    networks:
-      - default
-      - academico-db
-
-networks:
-  academico-db:
-    external: true
-    name: academico-esquema-bd_default
-```
-
-### 4.6. Validar login end to end
-
-Health check:
+Probar login:
 
 ```bash
-curl http://localhost:3001/api/health
-```
-
-Login:
-
-```bash
-curl -X POST http://localhost:3001/api/v1/auth/login \
+curl --http2-prior-knowledge -X POST http://localhost:3001/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -H "x-api-key: local-login-api-key" \
   -d '{
@@ -249,432 +620,18 @@ curl -X POST http://localhost:3001/api/v1/auth/login \
   }'
 ```
 
-La respuesta debe incluir `accessToken`, `refreshToken` y `sessionId`.
-
-## 5. Preparar la base de datos PostgreSQL
-
-Si la base esta vacia y no tiene las tablas del dominio de login, ejecutar el script de arranque:
+Limpiar:
 
 ```bash
-psql "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER password=$DB_PASSWORD sslmode=require" \
-  -f database/scripts/bootstrap_login_schema.sql
-```
-
-Ese script crea:
-
-- `academico.roles`
-- `academico.usuarios`
-- `academico.auth_sessions`
-- indices necesarios para busqueda por email, estado y sesiones
-- roles base: `estudiante`, `docente`, `administrador`, `admin`
-- usuarios de prueba para validar login en una instalacion nueva
-
-Si la base ya tiene tablas propias de usuarios y roles, no ejecutar este script directamente sobre esas tablas sin revisar compatibilidad. En ese caso usar vistas o adaptar la consulta como se describe en "Integrar con una base de datos PostgreSQL existente".
-
-Credenciales de prueba creadas por el script:
-
-| Usuario | Password | Rol |
-| --- | --- | --- |
-| `estudiante@demo.com` | `password123` | `estudiante` |
-| `docente@demo.com` | `password123` | `docente` |
-| `administrador@demo.com` | `admin123` | `administrador` |
-
-Eliminar o reemplazar estos usuarios antes de usar la base en produccion.
-
-El servicio consulta usuarios con este contrato:
-
-```sql
-SELECT
-  u.id AS usuario_id,
-  u.nombres,
-  u.apellidos,
-  u.email,
-  u.password_hash,
-  u.identificacion,
-  u.estado,
-  COALESCE(r.nombre, 'usuario') AS rol_nombre
-FROM academico.usuarios u
-INNER JOIN academico.roles r ON r.id = u.rol_id
-WHERE LOWER(u.email) = $1
-  AND LOWER(u.estado) = 'activo'
-LIMIT 1;
-```
-
-Por tanto, la base debe exponer estas columnas minimas:
-
-| Tabla | Columnas requeridas |
-| --- | --- |
-| `academico.roles` | `id`, `nombre` |
-| `academico.usuarios` | `id`, `rol_id`, `nombres`, `apellidos`, `email`, `password_hash`, `identificacion`, `estado` |
-
-El script de arranque crea un esquema equivalente a este:
-
-```sql
-CREATE SCHEMA IF NOT EXISTS academico;
-
-CREATE TABLE IF NOT EXISTS academico.roles (
-  id BIGSERIAL PRIMARY KEY,
-  nombre VARCHAR(80) NOT NULL UNIQUE,
-  descripcion TEXT
-);
-
-CREATE TABLE IF NOT EXISTS academico.usuarios (
-  id BIGSERIAL PRIMARY KEY,
-  rol_id BIGINT NOT NULL REFERENCES academico.roles(id),
-  nombres VARCHAR(120) NOT NULL,
-  apellidos VARCHAR(120) NOT NULL,
-  email VARCHAR(150) NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  identificacion VARCHAR(30),
-  estado VARCHAR(20) NOT NULL DEFAULT 'activo',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_usuarios_email_lower
-  ON academico.usuarios (LOWER(email));
-
-CREATE INDEX IF NOT EXISTS idx_usuarios_estado_lower
-  ON academico.usuarios (LOWER(estado));
-```
-
-El script tambien crea roles base equivalentes a:
-
-```sql
-INSERT INTO academico.roles (nombre, descripcion)
-VALUES
-  ('estudiante', 'Rol de estudiante'),
-  ('docente', 'Rol de docente'),
-  ('administrador', 'Rol de administrador'),
-  ('admin', 'Alias de administrador')
-ON CONFLICT (nombre) DO NOTHING;
-```
-
-Los nombres de rol reconocidos por el servicio son:
-
-- `estudiante`
-- `docente`
-- `administrador`
-- `admin`
-
-Otros nombres funcionan, pero reciben un perfil generico con permisos basicos.
-
-## 6. Aplicar la migracion del asset
-
-Si ya se ejecuto `database/scripts/bootstrap_login_schema.sql`, la tabla `academico.auth_sessions` ya fue creada. Esta migracion puede ejecutarse igual porque es idempotente.
-
-Aplicar la migracion:
-
-```bash
-psql "host=$DB_HOST port=$DB_PORT dbname=$DB_DATABASE user=$DB_USER password=$DB_PASSWORD sslmode=require" \
-  -f database/migrations/V1__login_core_asset.sql
-```
-
-Esta migracion crea `academico.auth_sessions`, usada para:
-
-- auditoria basica de sesiones;
-- hash SHA-256 del refresh token;
-- revocacion por logout;
-- deteccion de sesiones expiradas o revocadas.
-
-La tabla `auth_sessions` es recomendable. Si no existe, el login sigue emitiendo tokens, pero el servicio pierde persistencia de sesiones del lado servidor.
-
-## 7. Crear usuarios
-
-`password_hash` acepta:
-
-- bcrypt, recomendado para produccion;
-- `sha256:<hash>`;
-- SHA-256 hexadecimal de 64 caracteres;
-- texto plano legacy, solo para desarrollo o compatibilidad.
-
-Ejemplo recomendado con bcrypt desde Node:
-
-```bash
-node -e "const bcrypt=require('bcryptjs'); bcrypt.hash('password123', 10).then(console.log)"
-```
-
-Insertar otro usuario de prueba manualmente:
-
-```sql
-INSERT INTO academico.usuarios (
-  rol_id,
-  nombres,
-  apellidos,
-  email,
-  password_hash,
-  identificacion,
-  estado
-)
-SELECT
-  r.id,
-  'Usuario',
-  'Prueba',
-  'usuario@demo.com',
-  '<hash-bcrypt-generado>',
-  '1000000001',
-  'activo'
-FROM academico.roles r
-WHERE r.nombre = 'estudiante'
-ON CONFLICT (email) DO UPDATE SET
-  rol_id = EXCLUDED.rol_id,
-  nombres = EXCLUDED.nombres,
-  apellidos = EXCLUDED.apellidos,
-  password_hash = EXCLUDED.password_hash,
-  identificacion = EXCLUDED.identificacion,
-  estado = EXCLUDED.estado;
-```
-
-El repositorio tambien incluye `seed_user.cjs`, pero ese script crea usuarios con contraseña en texto plano para arranque rapido. No usarlo como patron de produccion.
-
-## 8. Levantar el servicio en desarrollo
-
-Instalar dependencias:
-
-```bash
-npm install
-```
-
-Generar contratos protobuf:
-
-```bash
-npm run proto:build
-```
-
-Ejecutar en modo desarrollo:
-
-```bash
-npm run start:dev
-```
-
-El servicio queda escuchando en:
-
-```text
-http://localhost:3001
-```
-
-## 9. Levantar el servicio con Docker
-
-Construir y ejecutar:
-
-```bash
-docker compose up -d --build
-```
-
-Ver logs:
-
-```bash
-docker compose logs -f academico-login
-```
-
-Detener:
-
-```bash
+cd /home/azureuser/academico-login
 docker compose down
+
+cd /home/azureuser/academico-esquema-bd
+docker compose down
+
+docker rmi academico-login:latest academico-postgres-ssl:15-alpine postgres:15-alpine || true
+
+cd /home/azureuser/academico-login
+cp -p /tmp/academico-login.env.before-local-test .env
+rm -f /tmp/academico-login.env.before-local-test
 ```
-
-El `docker-compose.yml` publica el puerto `3001:3001` y carga variables desde `.env`.
-
-Si la base de datos no corre dentro del mismo `docker-compose.yml`, `DB_HOST` debe ser alcanzable desde el contenedor. Usar el nombre del servicio cuando la base este en la misma red Docker, o el host/IP real cuando sea externa.
-
-## 10. Verificar build y pruebas
-
-Con Docker, validar que la imagen compile correctamente:
-
-```bash
-docker compose build
-```
-
-Si se quieren ejecutar pruebas sin instalar Node.js en el host, usar la etapa `builder` del `Dockerfile`:
-
-```bash
-docker build --target builder -t academico-login-test .
-docker run --rm --env-file .env academico-login-test npm test
-```
-
-Si se trabaja en desarrollo local sin Docker:
-
-```bash
-npm test
-npm run build
-```
-
-## 11. Validar funcionamiento
-
-Health check:
-
-```bash
-curl http://localhost:3001/api/health
-```
-
-Login:
-
-```bash
-curl -X POST http://localhost:3001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: $LOGIN_API_KEY" \
-  -d '{
-    "username": "estudiante@demo.com",
-    "password": "password123"
-  }'
-```
-
-Respuesta esperada:
-
-```json
-{
-  "accessToken": "<jwt>",
-  "refreshToken": "<jwt>",
-  "tokenType": "Bearer",
-  "expiresIn": 7200,
-  "sessionId": "SESSION-...",
-  "mfaRequired": false,
-  "requiresAppUpdate": false
-}
-```
-
-Validar token:
-
-```bash
-curl -X POST http://localhost:3001/api/v1/auth/validate-token-2 \
-  -H "x-api-key: $LOGIN_API_KEY" \
-  -H "Authorization: Bearer <accessToken>"
-```
-
-Renovar token:
-
-```bash
-curl -X POST http://localhost:3001/api/v1/auth/refresh \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: $LOGIN_API_KEY" \
-  -d '{"refreshToken":"<refreshToken>"}'
-```
-
-Cerrar sesion:
-
-```bash
-curl -X POST http://localhost:3001/api/v1/auth/logout \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: $LOGIN_API_KEY" \
-  -d '{"refreshToken":"<refreshToken>"}'
-```
-
-## 12. Integrar con una base de datos PostgreSQL existente
-
-Si la base existente ya tiene usuarios, hay dos caminos.
-
-### Opcion A: adaptar la base con vistas
-
-Crear vistas o tablas compatibles con el contrato esperado:
-
-- `academico.roles`
-- `academico.usuarios`
-
-Esta opcion evita cambiar el codigo del servicio. Es la recomendada cuando la base sigue siendo PostgreSQL.
-
-Ejemplo de vista para usuarios:
-
-```sql
-CREATE SCHEMA IF NOT EXISTS academico;
-
-CREATE OR REPLACE VIEW academico.usuarios AS
-SELECT
-  id_usuario AS id,
-  id_rol AS rol_id,
-  nombres,
-  apellidos,
-  correo AS email,
-  clave_hash AS password_hash,
-  documento AS identificacion,
-  estado
-FROM seguridad.usuarios;
-```
-
-Ejemplo de vista para roles:
-
-```sql
-CREATE OR REPLACE VIEW academico.roles AS
-SELECT
-  id_rol AS id,
-  nombre_rol AS nombre,
-  descripcion
-FROM seguridad.roles;
-```
-
-La vista debe devolver `estado = 'activo'` para usuarios habilitados o mapear el estado real a ese valor.
-
-### Opcion B: adaptar la consulta del servicio
-
-Modificar `findActiveUser` en `src/auth/auth.service.js` para leer las tablas reales. Mantener los alias de salida:
-
-- `usuario_id`
-- `nombres`
-- `apellidos`
-- `email`
-- `password_hash`
-- `identificacion`
-- `estado`
-- `rol_nombre`
-
-Si se conservan esos alias, el resto del flujo de JWT y sesiones no necesita cambios.
-
-## 13. Integrar con otro motor de base de datos
-
-Para un motor diferente a PostgreSQL, crear una capa de acceso equivalente:
-
-1. Reemplazar `src/db.js` por el cliente del motor elegido.
-2. Adaptar `findActiveUser` para consultar usuarios activos y devolver los mismos alias.
-3. Adaptar `registerSession`, `isSessionRevoked`, `touchSession` y `revokeSession` si se desea persistencia de sesiones.
-4. Reescribir `database/migrations/V1__login_core_asset.sql` al dialecto del motor.
-5. Mantener el mismo contrato de salida hacia `AuthService`.
-
-Contrato minimo que debe devolver la consulta de usuario:
-
-```js
-{
-  usuario_id: '1',
-  nombres: 'Usuario',
-  apellidos: 'Prueba',
-  email: 'usuario@demo.com',
-  password_hash: '<bcrypt>',
-  identificacion: '1000000001',
-  estado: 'activo',
-  rol_nombre: 'estudiante'
-}
-```
-
-Mientras ese contrato se cumpla, el servicio puede seguir generando el mismo payload JWT.
-
-## 14. Integrar consumidores
-
-Los consumidores REST deben enviar:
-
-- `x-api-key: <LOGIN_API_KEY>`;
-- `Content-Type: application/json` en peticiones con body;
-- `Authorization: Bearer <accessToken>` para validacion.
-
-Endpoints REST principales:
-
-| Metodo | Ruta | Uso |
-| --- | --- | --- |
-| `POST` | `/api/v1/auth/login` | Inicia sesion |
-| `POST` | `/api/v1/auth/refresh` | Renueva access token |
-| `POST` | `/api/v1/auth/logout` | Revoca sesion |
-| `POST` | `/api/v1/auth/validate-token` | Valida token enviado en body |
-| `POST` | `/api/v1/auth/validate-token-2` | Valida token desde header `Authorization` |
-| `GET` | `/api/v1/whitelist/all` | Publica rutas publicas |
-
-El servicio tambien expone contratos ConnectRPC/gRPC definidos en `proto/auth.proto`.
-
-## 15. Checklist de despliegue
-
-- `.env` creado y cargado.
-- `LOGIN_API_KEY` configurada y compartida solo con consumidores internos.
-- `JWT_SECRET` configurado con valor seguro.
-- Conexion `DB_*` validada.
-- Tablas o vistas `academico.usuarios` y `academico.roles` disponibles.
-- Usuarios activos con `password_hash` valido.
-- Migracion `database/migrations/V1__login_core_asset.sql` aplicada.
-- `npm run build` ejecuta correctamente.
-- `POST /api/v1/auth/login` responde tokens.
-- `POST /api/v1/auth/validate-token-2` valida el `accessToken`.
