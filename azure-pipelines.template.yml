@@ -13,7 +13,7 @@
 # - Production waits for ManualValidation and then deploys over SSH.
 #
 # Compose requirement:
-# - The compose file must exist in the repo, usually docker-compose.pipeline.yml.
+# - The compose file must exist in the repo, usually docker-compose.yml.
 # - Its image line should reference the configured imageEnvVariableName. Example:
 #     image: ${SERVICE_IMAGE}
 # - For single-port services, use PORT from .env. Example:
@@ -71,11 +71,11 @@ parameters:
 
 - name: devComposeFile
   type: string
-  default: 'docker-compose.pipeline.yml'
+  default: 'docker-compose.yml'
 
 - name: prodComposeFile
   type: string
-  default: 'docker-compose.pipeline.yml'
+  default: 'docker-compose.yml'
 
 # Name of the .env key used by docker compose for the pushed image.
 # The compose file must reference this variable in its image property.

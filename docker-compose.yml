@@ -1,13 +1,10 @@
 services:
   academico-login:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: academico-login:latest
+    image: ${ACADEMICO_LOGIN_IMAGE}
     container_name: academico-login
     restart: always
     ports:
-      - "3001:3001"
+      - "${PORT}:${PORT}"
     env_file:
       - .env
     environment:

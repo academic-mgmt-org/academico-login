@@ -23,11 +23,11 @@ variables:
   devAgentPool: 'Default'
   devAgentName: 'self-hosted-agent'
   devRemoteAppPath: '/home/azureuser/academico-login'
-  devComposeFile: 'docker-compose.pipeline.yml'
+  devComposeFile: 'docker-compose.yml'
   prodSshHost: '20.115.132.131'
   prodSshUser: 'azureuser'
   prodRemoteAppPath: '/home/azureuser/academico-login'
-  prodComposeFile: 'docker-compose.pipeline.yml'
+  prodComposeFile: 'docker-compose.yml'
 
 stages:
 - stage: Build
