@@ -747,39 +747,102 @@ Fixes AB#26
 
 # 18. Ubicación dentro de la Plataforma Core Assets
 
-```text
-Core Assets
+De acuerdo con los repositorios existentes en `academic-mgmt-org`, el `Authentication Service`
+corresponde al repositorio `academico-login` y se ubica dentro de la plataforma como Core
+Asset de identidad. La plataforma actual no expone repositorios independientes para
+`Authorization Service`, `Audit Service`, `File Service` ni `Reporting Service`; por tanto,
+no se listan como servicios existentes en esta vista.
 
-├── Authentication Service
-├── Authorization Service
-├── Gestión de Usuarios
-├── Audit Service
-├── Notification Service
-├── File Service
-└── Reporting Service
+```text
+academic-mgmt-org
+
+├── Core Assets funcionales
+│   ├── academico-login
+│   │   └── Authentication Service: login, JWT, refresh, logout, sesiones y whitelist
+│   │
+│   ├── academico-usuarios
+│   │   └── User Management Service: ciclo de vida, estado y perfil de usuarios
+│   │
+│   ├── academico-calificaciones
+│   │   └── Grades & Evaluations Service: calificaciones y evaluaciones académicas
+│   │
+│   └── academico-notificaciones
+│       └── Notification Service: notificaciones académicas in-app
+│
+├── Componentes de plataforma
+│   ├── academico-gateway
+│   │   └── API Gateway: entrada HTTP/gRPC, validación JWT, whitelist y ruteo
+│   │
+│   └── academico-esquema-bd
+│       └── Esquema PostgreSQL académico: migraciones, tablas base, índices y semillas
+│
+└── Canal consumidor
+    └── academico-web
+        └── Aplicación Laravel que consume los servicios académicos vía Gateway
 ```
 
-`Gestión de Usuarios` se muestra como Core Asset complementario de la plataforma, no como funcionalidad implementada dentro de `academico-login`.
+`academico-login` no administra usuarios ni el Gateway. Su rol es autenticar credenciales,
+emitir y validar tokens, mantener sesiones y publicar la whitelist pública consumida por
+`academico-gateway`.
+
+Lectura correcta de responsabilidades:
+
+- `academico-login`: autoridad de autenticación y sesiones.
+- `academico-usuarios`: autoridad del ciclo de vida del usuario; crea, consulta, actualiza,
+  activa y desactiva usuarios.
+- `academico-gateway`: punto de entrada de la plataforma; consulta la whitelist en
+  `academico-login`, valida JWT contra `academico-login` y enruta hacia los microservicios
+  internos.
+- `academico-web`: cliente Laravel; consume la plataforma a través del Gateway y no debe
+  invocar microservicios internos directamente desde el navegador.
+- `academico-esquema-bd`: fuente de verdad del esquema `academico`; provee tablas como
+  `usuarios`, `roles`, `auth_sessions`, `notificaciones`, `calificaciones` y demás
+  estructuras compartidas.
+- `academico-notificaciones`: consume identidad autenticada mediante JWT y gestiona
+  notificaciones propias del usuario.
+- `academico-calificaciones`: servicio existente para el dominio de calificaciones y
+  evaluaciones académicas.
 
 ## Flujo Integrado
 
 ```text
-Login Usuario
+Usuario
+  │
+  ▼
+academico-web
+  │
+  │ POST /login/api/v1/auth/login
+  ▼
+academico-gateway
+  │
+  │ enruta /login/* y consulta whitelist pública
+  ▼
+academico-login
+  │
+  ├── Valida credenciales contra academico.usuarios y academico.roles
+  ├── Registra o revoca sesiones en academico.auth_sessions
+  ├── Emite accessToken y refreshToken
+  └── Expone validación JWT para el Gateway
+  │
+  ▼
+Usuario autenticado con JWT
       │
+      │ Authorization: Bearer <accessToken>
       ▼
-
-Authentication Service
+academico-gateway
+  │
+  ├── Valida JWT contra academico-login
+  ├── Aplica reglas de whitelist, cache y rate limiting
+  └── Redirige al servicio destino según el prefijo
       │
-      ├── Valida credenciales contra academico.usuarios y academico.roles
-      ├── Emite JWT
-      ├── Registra sesión
-      └── Publica identidad al Gateway
-
-             ↓
-
-        Usuario autenticado
+      ├── /usuarios/*          -> academico-usuarios
+      ├── /calificaciones/*    -> academico-calificaciones
+      └── /notificaciones/*    -> academico-notificaciones
 ```
 
 ### Beneficio Estratégico
 
-El **Authentication Service** concentra la política de login y emisión de tokens en un Core Asset reutilizable. Esto permite que nuevas líneas de producto consuman el mismo contrato de autenticación sin duplicar validaciones, secretos, sesiones ni reglas de integración con el Gateway.
+El **Authentication Service** concentra la política de login, emisión de tokens, validación
+JWT y sesiones en un Core Asset reutilizable. En la plataforma actual, esto permite que
+`academico-web` y los microservicios existentes consuman una identidad común a través de
+`academico-gateway`, sin duplicar validaciones, secretos ni reglas de sesión.
