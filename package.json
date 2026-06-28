@@ -6,6 +6,10 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
+    "proto:generate": "buf generate --path proto .",
+    "proto:descriptor": "buf build --path proto . -o src/gen/descriptor.bin",
+    "proto:build": "npm run proto:generate && npm run proto:descriptor",
+    "prebuild": "npm run proto:build",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -37,6 +41,7 @@
     "@nestjs/platform-fastify": "^10.4.22",
     "@nestjs/swagger": "^8.1.0",
     "axios": "^1.7.9",
+    "bcryptjs": "^3.0.3",
     "cache-manager-redis-store": "^3.0.1",
     "express-rate-limit": "^7.5.0",
     "fastify": "^5.8.5",

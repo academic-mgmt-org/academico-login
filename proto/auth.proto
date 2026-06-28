@@ -1,0 +1,53 @@
+syntax = "proto3";
+package auth.v1;
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+  string app_version = 3;
+  string password_encoding = 4;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  bool mfa_required = 3;
+  bool requires_app_update = 4;
+  string token_type = 5;
+  int32 expires_in = 6;
+  string session_id = 7;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool is_valid = 1;
+  string identifier = 2;
+  string email = 3;
+  string session_id = 4;
+  string user_id = 5;
+  string role = 6;
+}
+
+message LogoutRequest {
+  string token = 1;
+  string refresh_token = 2;
+}
+
+message GenericResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+service AuthService {
+  rpc Login(LoginRequest) returns (LoginResponse) {}
+  rpc RefreshToken(RefreshTokenRequest) returns (LoginResponse) {}
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse) {}
+  rpc Logout(LogoutRequest) returns (GenericResponse) {}
+}
