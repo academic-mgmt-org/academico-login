@@ -113,7 +113,18 @@ export class HttpExceptionFilter {
       this.logger.warn(logContext, `⚠️ Error ${status}: ${errorMessage}`);
     }
 
-    // Enviar respuesta al cliente
-    response.status(status).send(errorResponse);
+    // Enviar respuesta al cliente. Express usa status(); Fastify usa code().
+    if (typeof response.status === 'function') {
+      response.status(status).send(errorResponse);
+      return;
+    }
+
+    if (typeof response.code === 'function') {
+      response.code(status).send(errorResponse);
+      return;
+    }
+
+    response.statusCode = status;
+    response.end(JSON.stringify(errorResponse));
   }
 }
