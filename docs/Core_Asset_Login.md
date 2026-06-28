@@ -685,8 +685,12 @@ Validación de contenedor en ejecución
 
 ## Commit
 
-```bash
-git commit -m "feat(login): completar core asset de autenticacion AB#26"
+```text
+Commit funcional principal:
+563cf1a feat: implement token-based session management, refresh tokens, and authentication logic for core asset login
+
+Commit documental de trazabilidad:
+docs(login): document core asset completion AB#26
 ```
 
 ---
