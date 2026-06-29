@@ -1,92 +1,919 @@
-# academico-login
+# Documento Técnico Core Asset: Authentication Service (Login)
 
-Microservicio de login y autenticacion del Sistema de Gestion Academica.
+## 1. Información General
 
-## Rol en la arquitectura
+|Campo|Valor|
+|---|---|
+|Nombre|Authentication Service|
+|Tipo|Core Asset|
+|Dominio|Identidad y Autenticación|
+|Tecnología|NestJS + ConnectRPC/gRPC + REST|
+|Base de Datos|PostgreSQL|
+|Versión|1.0.0|
+|Reutilizable|Sí|
 
-Este servicio es el Core Asset de autenticacion para el flujo usado por
-`academico-web` y `academico-gateway`:
+---
 
-- Valida credenciales de usuario.
-- Emite `accessToken` y `refreshToken` JWT.
-- Renueva sesiones mediante `auth.v1.AuthService/RefreshToken`.
-- Revoca sesiones mediante `auth.v1.AuthService/Logout`.
-- Valida JWT mediante `auth.v1.AuthService/ValidateTokenWithHeader`.
-- Publica la whitelist de rutas publicas mediante `auth.v1.WhitelistService/GetAll`.
-- Protege llamadas internas con `LOGIN_API_KEY`.
-- Consulta la tabla `academico.usuarios` para validar credenciales, pero no
-  administra el ciclo de vida de usuarios.
-- Registra sesiones en `academico.auth_sessions` cuando la migracion del asset
-  fue aplicada.
+# 2. Objetivo
 
-El contrato reutilizable del asset es `auth.v1.AuthService`.
+Centralizar la autenticación de usuarios para las líneas de productos académicos.
 
-## Documentacion transversal
+Este servicio será responsable de:
 
-La documentacion canonica del flujo web -> gateway -> login -> JWT -> gateway -> servicio esta en:
+- Validar credenciales.
+- Emitir `accessToken` y `refreshToken`.
+- Validar tokens para el Gateway.
+- Renovar sesiones autenticadas.
+- Revocar sesiones.
+- Publicar la whitelist consumida por el Gateway.
+- Mantener un contrato reutilizable para nuevos clientes web, móviles o gateways.
 
-- `academico-gateway/docs/architecture/gateway-auth-routing.md`
-- `academico-gateway/docs/adr/0001-gateway-auth-jwt-routing.md`
-- `DOCUMENTACION_CORE_ASSET_LOGIN.md`
+---
 
-En Azure DevOps, publicar `academico-gateway/docs` como Wiki del proyecto para que esta documentacion quede visible para todos los repositorios participantes.
+# 3. Responsabilidades
 
-## Configuracion
+## Incluye
 
-Ver [.env.example](.env.example).
+- Login de usuarios activos.
+- Generación de JWT.
+- Refresh token.
+- Logout y revocación de sesión.
+- Validación criptográfica de JWT.
+- Whitelist de rutas públicas.
+- Protección interna por `LOGIN_API_KEY`.
+- Registro opcional de sesiones en `academico.auth_sessions`.
 
-Variables principales:
+---
 
-- `PORT`
-- `LOGIN_API_KEY`
-- `JWT_SECRET`
-- `JWT_DOC_SECRET`
-- `JWT_ACCESS_TTL`
-- `JWT_REFRESH_TTL`
-- `DB_HOST`
-- `DB_PORT`
-- `DB_DATABASE`
-- `DB_USER`
-- `DB_PASSWORD`
+## No Incluye
 
-## Base de datos
+- Creación de usuarios.
+- Actualización de usuarios.
+- Asignación administrativa de roles.
+- Gestión de organizaciones.
+- Recuperación de contraseña.
+- MFA avanzado.
+- Administración de permisos.
 
-La migracion del asset esta en:
+---
+
+# 4. Ubicación en la Arquitectura
+
+El `Authentication Service` no administra el Gateway ni administra usuarios. Su responsabilidad es autenticar y mantener sesiones.
+
+```text
+Authentication Service
+│
+├── Login
+├── Emisión y validación de JWT
+├── Refresh token
+├── Logout
+└── Sesiones en academico.auth_sessions
+```
+
+Sus conexiones con el resto de la plataforma son integraciones:
+
+```text
+Cliente consumidor
+(web, móvil, backend, gateway)
+      │
+      ▼
+academico-gateway / backend integrador (opcional)
+      │
+      │ solicita login, refresh, validate-token o whitelist
+      ▼
+Authentication Service
+      │
+      ├── Lee usuarios activos, roles y password_hash
+      │       desde academico.usuarios y academico.roles
+      │
+      ├── Crea, consulta o revoca sesiones
+      │       en academico.auth_sessions
+      │
+      └── Devuelve tokens e identidad validada
+              al Gateway o cliente integrador
+```
+
+Lectura correcta de las conexiones:
+
+- `Gateway`: consume el servicio de autenticación. No es gestionado por `academico-login`.
+- `Tablas de Usuario`: son fuente de datos para validar credenciales, estado y rol. `academico-login` no crea ni modifica usuarios.
+- `academico.auth_sessions`: sí es gestionada por `academico-login`, porque forma parte del ciclo de sesión.
+- `Audit`: representa una integración futura o complementaria para eventos de auditoría; no forma parte obligatoria del flujo actual.
+
+El servicio es la autoridad de autenticación. El ciclo de vida maestro del usuario no está implementado en este asset; permanece en el Core Asset de Gestión de Usuarios o en el modelo de datos existente. Para autenticar, este servicio consulta las tablas `academico.usuarios` y `academico.roles`.
+
+---
+
+# 5. Modelo de Dominio
+
+## Entidades principales
+
+```text
+User
+  │
+  ├── Role
+  │
+  └── AuthSession
+        │
+        ├── AccessToken
+        └── RefreshTokenHash
+```
+
+---
+
+# 6. Casos de Uso
+
+## CU-001 Iniciar Sesión
+
+Actor:
+
+```text
+Usuario académico
+```
+
+Proceso:
+
+```text
+1. Recibir usuario y contraseña
+2. Normalizar correo
+3. Validar usuario activo
+4. Verificar password_hash
+5. Crear sessionId
+6. Emitir accessToken y refreshToken
+7. Registrar sesión si la tabla existe
+```
+
+---
+
+## CU-002 Validar Token
+
+Permite al Gateway validar:
+
+- Firma JWT.
+- Expiración.
+- Tipo de token.
+- Sesión revocada cuando existe `auth_sessions`.
+- Identidad mínima para ruteo seguro.
+
+---
+
+## CU-003 Renovar Token
+
+Entrada:
+
+```text
+refreshToken
+```
+
+Resultado:
+
+```text
+Nuevo accessToken con el mismo sessionId
+```
+
+---
+
+## CU-004 Cerrar Sesión
+
+Proceso:
+
+```text
+1. Recibir accessToken o refreshToken
+2. Validar firma
+3. Marcar auth_sessions.revoked_at
+4. Responder estado de revocación
+```
+
+---
+
+## CU-005 Publicar Whitelist
+
+Rutas públicas expuestas al Gateway:
+
+- `/login/api/v1/auth/login`
+- `/login/api/v1/auth/refresh`
+
+---
+
+# 7. Modelo de Datos
+
+## Ejemplo mínimo para arranque con `academico.usuarios` y `academico.roles`
+
+Para que el servicio de login entre en funcionamiento, las únicas tablas obligatorias son:
+
+```text
+academico.roles
+academico.usuarios
+```
+
+`academico.auth_sessions` es recomendable para persistir sesiones, revocación y trazabilidad, pero no es obligatoria para un arranque mínimo. Si la tabla no existe, el servicio sigue emitiendo `accessToken` y `refreshToken`; simplemente no tendrá persistencia de sesiones del lado servidor.
+
+El servicio consulta los usuarios con el siguiente contrato lógico:
+
+```sql
+SELECT
+  u.id AS usuario_id,
+  u.nombres,
+  u.apellidos,
+  u.email,
+  u.password_hash,
+  u.identificacion,
+  u.estado,
+  COALESCE(r.nombre, 'usuario') AS rol_nombre
+FROM academico.usuarios u
+INNER JOIN academico.roles r ON r.id = u.rol_id
+WHERE LOWER(u.email) = $1
+  AND LOWER(u.estado) = 'activo'
+LIMIT 1;
+```
+
+Por tanto, el esquema mínimo debe exponer estas columnas:
+
+|Tabla|Columnas mínimas requeridas|
+|---|---|
+|`academico.roles`|`id`, `nombre`|
+|`academico.usuarios`|`id`, `rol_id`, `nombres`, `apellidos`, `email`, `password_hash`, `identificacion`, `estado`|
+
+Ejemplo SQL mínimo:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS academico;
+
+CREATE TABLE IF NOT EXISTS academico.roles (
+  id BIGSERIAL PRIMARY KEY,
+  nombre VARCHAR(80) NOT NULL UNIQUE,
+  descripcion TEXT
+);
+
+CREATE TABLE IF NOT EXISTS academico.usuarios (
+  id BIGSERIAL PRIMARY KEY,
+  rol_id BIGINT NOT NULL REFERENCES academico.roles(id),
+  nombres VARCHAR(120) NOT NULL,
+  apellidos VARCHAR(120) NOT NULL,
+  email VARCHAR(150) NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  identificacion VARCHAR(30),
+  estado VARCHAR(20) NOT NULL DEFAULT 'activo',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usuarios_email_lower
+  ON academico.usuarios (LOWER(email));
+
+CREATE INDEX IF NOT EXISTS idx_usuarios_estado_lower
+  ON academico.usuarios (LOWER(estado));
+```
+
+Semilla mínima para probar login:
+
+```sql
+INSERT INTO academico.roles (nombre, descripcion)
+VALUES
+  ('estudiante', 'Rol de estudiante'),
+  ('docente', 'Rol de docente'),
+  ('administrador', 'Rol de administrador')
+ON CONFLICT (nombre) DO NOTHING;
+
+INSERT INTO academico.usuarios (
+  rol_id,
+  nombres,
+  apellidos,
+  email,
+  password_hash,
+  identificacion,
+  estado
+)
+SELECT
+  r.id,
+  'Estudiante',
+  'Prueba',
+  'estudiante@utn.edu.ec',
+  'password123',
+  '1000000001',
+  'activo'
+FROM academico.roles r
+WHERE r.nombre = 'estudiante'
+ON CONFLICT (email) DO UPDATE SET
+  rol_id = EXCLUDED.rol_id,
+  nombres = EXCLUDED.nombres,
+  apellidos = EXCLUDED.apellidos,
+  password_hash = EXCLUDED.password_hash,
+  identificacion = EXCLUDED.identificacion,
+  estado = EXCLUDED.estado,
+  updated_at = NOW();
+```
+
+Con esa semilla, la autenticación mínima puede probarse así:
+
+```bash
+curl --http2-prior-knowledge \
+  -X POST http://localhost:3001/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{
+    "username": "estudiante@utn.edu.ec",
+    "password": "password123"
+  }'
+```
+
+También se puede enviar la contraseña en Base64:
+
+```bash
+curl --http2-prior-knowledge \
+  -X POST http://localhost:3001/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{
+    "username": "estudiante@utn.edu.ec",
+    "password": "cGFzc3dvcmQxMjM=",
+    "passwordEncoding": "base64"
+  }'
+```
+
+Notas operativas:
+
+- `email` se compara en minúsculas, por lo que se recomienda mantenerlo normalizado.
+- `estado` debe ser `activo`; cualquier otro estado impide el login.
+- `nombre` en `academico.roles` controla el perfil incluido en el JWT. Los valores reconocidos por defecto son `estudiante`, `docente`, `administrador` o `admin`.
+- `password_hash` acepta `bcrypt`, `sha256:<hash>`, SHA-256 hexadecimal y texto plano legacy. Para producción se recomienda `bcrypt`; el texto plano anterior solo existe para semillas mínimas o compatibilidad legacy.
+
+---
+
+## auth_sessions
+
+```sql
+CREATE TABLE academico.auth_sessions (
+  session_id VARCHAR(80) PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  username VARCHAR(150) NOT NULL,
+  email VARCHAR(150) NOT NULL,
+  role_name VARCHAR(80) NOT NULL,
+  refresh_token_hash CHAR(64) NOT NULL,
+  user_agent TEXT,
+  ip_address VARCHAR(64),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+```
+
+Script:
 
 ```text
 database/migrations/V1__login_core_asset.sql
 ```
 
-Debe aplicarse sobre el esquema `academico` para habilitar auditoria basica,
-revocacion de sesiones y hash de refresh tokens. Si la tabla aun no existe, el
-servicio conserva compatibilidad y no bloquea el login.
+---
 
-## Contratos
+# 8. Estados de Sesión
 
-ConnectRPC/gRPC:
-
-- `auth.v1.AuthService/Login`
-- `auth.v1.AuthService/RefreshToken`
-- `auth.v1.AuthService/ValidateToken`
-- `auth.v1.AuthService/ValidateTokenSimple`
-- `auth.v1.AuthService/ValidateTokenWithHeader`
-- `auth.v1.AuthService/Logout`
-- `auth.v1.WhitelistService/GetAll`
-- `auth.v1.HealthService/Health`
-- `auth.v1.HealthService/Ready`
-- `auth.v1.HealthService/Live`
-
-## Ejecucion local
-
-```bash
-npm install
-npm run proto:build
-npm run start:dev
+```text
+ACTIVE
+EXPIRED
+REVOKED
+INVALID
 ```
 
-## Pruebas
+---
 
-```bash
-npm test
-npm run build
+# 9. Reglas de Negocio
+
+## RN-001
+
+Solo usuarios con `academico.usuarios.estado = 'activo'` pueden autenticarse.
+
+---
+
+## RN-002
+
+El correo se normaliza a minúsculas antes de consultar la base de datos.
+
+---
+
+## RN-003
+
+El `refreshToken` completo no se almacena en base de datos.
+
+```text
+Solo se persiste SHA-256(refreshToken)
 ```
+
+---
+
+## RN-004
+
+El asset soporta `password_hash` en `bcrypt`, `sha256:<hash>`, hash SHA-256 hexadecimal y texto plano legacy para compatibilidad con semillas actuales.
+
+---
+
+## RN-005
+
+Las llamadas internas deben incluir `x-api-key` con el valor configurado en `LOGIN_API_KEY`.
+
+---
+
+# 10. Contrato gRPC
+
+## auth.proto
+
+```protobuf
+syntax = "proto3";
+package auth.v1;
+
+service AuthService {
+  rpc Login(LoginRequest)
+      returns(LoginResponse);
+
+  rpc RefreshToken(RefreshTokenRequest)
+      returns(LoginResponse);
+
+  rpc ValidateToken(ValidateTokenRequest)
+      returns(ValidateTokenResponse);
+
+  rpc Logout(LogoutRequest)
+      returns(GenericResponse);
+}
+```
+
+---
+
+## LoginRequest
+
+```protobuf
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+  string app_version = 3;
+  string password_encoding = 4;
+}
+```
+
+---
+
+## LoginResponse
+
+```protobuf
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  bool mfa_required = 3;
+  bool requires_app_update = 4;
+  string token_type = 5;
+  int32 expires_in = 6;
+  string session_id = 7;
+}
+```
+
+---
+
+## ValidateTokenResponse
+
+```protobuf
+message ValidateTokenResponse {
+  bool is_valid = 1;
+  string identifier = 2;
+  string email = 3;
+  string session_id = 4;
+  string user_id = 5;
+  string role = 6;
+}
+```
+
+---
+
+## DTOs de integración REST y ConnectRPC/gRPC
+
+Los DTOs del core asset se implementan en:
+
+```text
+src/auth/dto/auth.dto.js
+```
+
+Estos objetos definen el contrato reutilizable entre el controlador REST, las rutas ConnectRPC/gRPC y la capa de servicio. Su objetivo es mantener una sola forma de normalizar entradas, validar campos mínimos y mapear respuestas para nuevas líneas de producto o clientes integradores.
+
+### DTOs de entrada
+
+```text
+LoginRequestDto
+RefreshTokenRequestDto
+LogoutRequestDto
+ValidateTokenRequestDto
+RequestContextDto
+```
+
+Responsabilidades:
+
+- `LoginRequestDto`: exige `username` y `password`, normaliza `username` a minúsculas y acepta aliases `appVersion`/`app_version` y `passwordEncoding`/`password_encoding`.
+- `RefreshTokenRequestDto`: exige `refreshToken` y acepta `refreshToken`/`refresh_token` o el token como cadena directa.
+- `LogoutRequestDto`: acepta `token`, `refreshToken`/`refresh_token` o un token como cadena directa; no exige token en body para permitir fallback por headers.
+- `ValidateTokenRequestDto`: normaliza el token recibido desde body o cadena directa.
+- `RequestContextDto`: extrae `ipAddress` desde `x-forwarded-for` o `x-real-ip` y `userAgent` desde `user-agent` para registrar contexto de sesión.
+
+### DTOs de salida
+
+```text
+LoginResponseDto
+ValidateTokenResponseDto
+LogoutResponseDto
+```
+
+Responsabilidades:
+
+- `LoginResponseDto`: expone `accessToken`, `refreshToken`, `tokenType`, `expiresIn`, `sessionId`, `mfaRequired` y `requiresAppUpdate`.
+- `ValidateTokenResponseDto`: expone `isValid`, `identifier`, `email`, `sessionId`, `userId`, `role` y `applications` cuando aplica.
+- `LogoutResponseDto`: expone `success`, `revoked` y `message`.
+
+Los DTOs se consumen directamente desde:
+
+```text
+src/auth/auth.controller.js
+src/auth/auth.service.js
+src/connect-routes.js
+```
+
+---
+
+# 11. Eventos de Dominio
+
+El servicio debe emitir eventos técnicos para Auditoría y Observabilidad.
+
+## AUTH_LOGIN_SUCCEEDED
+
+```json
+{
+  "event":"AUTH_LOGIN_SUCCEEDED",
+  "email":"estudiante@utn.edu.ec",
+  "sessionId":"SESSION-..."
+}
+```
+
+---
+
+## AUTH_LOGIN_FAILED
+
+```json
+{
+  "event":"AUTH_LOGIN_FAILED",
+  "email":"estudiante@utn.edu.ec",
+  "reason":"INVALID_CREDENTIALS"
+}
+```
+
+---
+
+## AUTH_TOKEN_REFRESHED
+
+```json
+{
+  "event":"AUTH_TOKEN_REFRESHED",
+  "sessionId":"SESSION-..."
+}
+```
+
+---
+
+## AUTH_SESSION_REVOKED
+
+```json
+{
+  "event":"AUTH_SESSION_REVOKED",
+  "sessionId":"SESSION-..."
+}
+```
+
+---
+
+# 12. Integraciones
+
+## academico-web
+
+Consume:
+
+```text
+POST /api/auth/login
+```
+
+El backend Laravel traduce esta llamada a gRPC usando `auth.v1.AuthService/Login`.
+
+---
+
+## academico-gateway
+
+Consume:
+
+```text
+/login/api/v1/auth/login
+/login/api/v1/auth/refresh
+/login/api/v1/auth/validate-token-2
+/login/api/v1/whitelist/all
+```
+
+---
+
+## Fuente de Usuarios Existente
+
+Este asset no implementa creación, actualización ni administración de usuarios. Para el login consume la información existente en base de datos:
+
+```text
+academico.usuarios
+academico.roles
+```
+
+---
+
+## Audit Service
+
+Registra:
+
+```text
+AUTH_LOGIN_SUCCEEDED
+AUTH_LOGIN_FAILED
+AUTH_TOKEN_REFRESHED
+AUTH_SESSION_REVOKED
+```
+
+---
+
+# 13. Observabilidad
+
+## Logs
+
+```json
+{
+  "service":"academico-login",
+  "operation":"LOGIN",
+  "email":"estudiante@utn.edu.ec",
+  "sessionId":"SESSION-..."
+}
+```
+
+---
+
+## Métricas
+
+- Logins exitosos.
+- Logins fallidos.
+- Tokens validados.
+- Tokens renovados.
+- Sesiones revocadas.
+- Latencia promedio de login.
+- Errores de conexión a base de datos.
+
+---
+
+# 14. Seguridad
+
+## Datos sensibles
+
+No exponer:
+
+```text
+Contraseñas
+JWT completos en logs
+Refresh tokens completos
+API keys
+Secretos JWT
+```
+
+---
+
+## Protección
+
+Aplicar:
+
+- TLS en tránsito.
+- `LOGIN_API_KEY` para tráfico interno.
+- JWT firmado con `JWT_SECRET`.
+- TTL configurable con `JWT_ACCESS_TTL` y `JWT_REFRESH_TTL`.
+- Hash de refresh token en base de datos.
+- Revocación por `sessionId`.
+
+---
+
+# 15. Integración DevOps
+
+## Azure Boards
+
+Epic:
+
+```text
+Gestión de Identidades
+```
+
+Feature:
+
+```text
+Autenticación y Sesiones
+```
+
+Historia:
+
+```text
+US-5 Implementar Core Asset Login
+```
+
+---
+
+## Pipeline
+
+```text
+Trigger en main
+↓
+Build Docker y publicar imagen en ACR
+↓
+Despliegue a desarrollo con Docker Compose
+↓
+Validación de contenedor en ejecución
+↓
+Aprobación manual para producción
+↓
+Despliegue a producción con Docker Compose
+↓
+Validación de contenedor en ejecución
+```
+
+---
+
+## Commit
+
+```text
+Commit funcional principal:
+563cf1a feat: implement token-based session management, refresh tokens, and authentication logic for core asset login
+
+Commit documental de trazabilidad:
+docs(login): document core asset completion AB#26
+```
+
+---
+
+## Pull Request
+
+```text
+Implementación Core Asset Login
+
+Fixes AB#26
+```
+
+---
+
+# 16. Quality Gates
+
+|Métrica|Objetivo|
+|---|---|
+|Cobertura|>= 85%|
+|Vulnerabilidades críticas|0|
+|Bugs críticos|0|
+|Latencia login|< 200 ms|
+|Latencia validación token|< 100 ms|
+|Disponibilidad|99.9%|
+
+---
+
+# 17. Roadmap Evolutivo
+
+### Versión 1.0
+
+- Login.
+- JWT.
+- Refresh token.
+- Logout.
+- Validación para Gateway.
+- Whitelist pública.
+
+### Versión 1.1
+
+- MFA.
+- Políticas de bloqueo por intentos fallidos.
+- Rotación de refresh tokens.
+- Métricas Prometheus.
+
+### Versión 2.0
+
+- JWKS para validación distribuida.
+- Federación OIDC/SAML.
+- Multi-tenant.
+- Integración con directorios corporativos.
+
+---
+
+# 18. Ubicación dentro de la Plataforma Core Assets
+
+De acuerdo con los repositorios existentes en `academic-mgmt-org`, el `Authentication Service`
+corresponde al repositorio `academico-login` y se ubica dentro de la plataforma como Core
+Asset de identidad. La plataforma actual no expone repositorios independientes para
+`matrículas`, `solicitudes`, `Authorization Service`, `Audit Service`, `File Service` ni
+`Reporting Service`; por tanto, no se listan como servicios implementados en esta vista.
+Sin embargo, `matrículas` y `solicitudes` sí aparecen como dominios del esquema académico
+y como destinos configurables del Gateway, por lo que quedan identificados como Core Assets
+modelados o previstos.
+
+```text
+academic-mgmt-org
+
+├── Core Assets funcionales
+│   ├── academico-login
+│   │   └── Authentication Service: login, JWT, refresh, logout, sesiones y whitelist
+│   │
+│   ├── academico-usuarios
+│   │   └── User Management Service: ciclo de vida, estado y perfil de usuarios
+│   │
+│   ├── academico-calificaciones
+│   │   └── Grades & Evaluations Service: calificaciones y evaluaciones académicas
+│   │
+│   └── academico-notificaciones
+│       └── Notification Service: notificaciones académicas in-app
+│
+├── Core Assets modelados o previstos
+│   ├── Matrículas e Inscripciones
+│   │   └── Dominio presente en academico-esquema-bd y destino configurable del Gateway
+│   │
+│   └── Solicitudes Académicas
+│       └── Dominio presente en academico-esquema-bd y destino configurable del Gateway
+│
+├── Componentes de plataforma
+│   ├── academico-gateway
+│   │   └── API Gateway: entrada HTTP/gRPC, validación JWT, whitelist y ruteo
+│   │
+│   └── academico-esquema-bd
+│       └── Esquema PostgreSQL académico: migraciones, tablas base, índices y semillas
+│
+└── Canal consumidor
+    └── academico-web
+        └── Aplicación Laravel que consume los servicios académicos vía Gateway
+```
+
+`academico-login` no administra usuarios ni el Gateway. Su rol es autenticar credenciales,
+emitir y validar tokens, mantener sesiones y publicar la whitelist pública consumida por
+`academico-gateway`.
+
+Lectura correcta de responsabilidades:
+
+- `academico-login`: autoridad de autenticación y sesiones.
+- `academico-usuarios`: autoridad del ciclo de vida del usuario; crea, consulta, actualiza,
+  activa y desactiva usuarios.
+- `academico-gateway`: punto de entrada de la plataforma; consulta la whitelist en
+  `academico-login`, valida JWT contra `academico-login` y enruta hacia los microservicios
+  internos.
+- `academico-web`: cliente Laravel; consume la plataforma a través del Gateway y no debe
+  invocar microservicios internos directamente desde el navegador.
+- `academico-esquema-bd`: fuente de verdad del esquema `academico`; provee tablas como
+  `usuarios`, `roles`, `auth_sessions`, `notificaciones`, `calificaciones` y demás
+  estructuras compartidas.
+- `academico-notificaciones`: consume identidad autenticada mediante JWT y gestiona
+  notificaciones propias del usuario.
+- `academico-calificaciones`: servicio existente para el dominio de calificaciones y
+  evaluaciones académicas.
+- `Matrículas e Inscripciones`: dominio académico modelado en base de datos y contemplado
+  por el Gateway; falta repositorio/microservicio dedicado en `academic-mgmt-org`.
+- `Solicitudes Académicas`: dominio académico modelado en base de datos y contemplado
+  por el Gateway; falta repositorio/microservicio dedicado en `academic-mgmt-org`.
+
+## Flujo Integrado
+
+```text
+Usuario
+  │
+  ▼
+academico-web
+  │
+  │ POST /login/api/v1/auth/login
+  ▼
+academico-gateway
+  │
+  │ enruta /login/* y consulta whitelist pública
+  ▼
+academico-login
+  │
+  ├── Valida credenciales contra academico.usuarios y academico.roles
+  ├── Registra o revoca sesiones en academico.auth_sessions
+  ├── Emite accessToken y refreshToken
+  └── Expone validación JWT para el Gateway
+  │
+  ▼
+Usuario autenticado con JWT
+      │
+      │ Authorization: Bearer <accessToken>
+      ▼
+academico-gateway
+  │
+  ├── Valida JWT contra academico-login
+  ├── Aplica reglas de whitelist, cache y rate limiting
+  └── Redirige al servicio destino según el prefijo
+      │
+      ├── /usuarios/*          -> academico-usuarios
+      ├── /calificaciones/*    -> academico-calificaciones
+      └── /notificaciones/*    -> academico-notificaciones
+
+      Dominios previstos cuando exista microservicio dedicado:
+
+      ├── /matriculas/*        -> Matrículas e Inscripciones
+      └── /solicitudes/*       -> Solicitudes Académicas
+```
+
+### Beneficio Estratégico
+
+El **Authentication Service** concentra la política de login, emisión de tokens, validación
+JWT y sesiones en un Core Asset reutilizable. En la plataforma actual, esto permite que
+`academico-web` y los microservicios existentes consuman una identidad común a través de
+`academico-gateway`, sin duplicar validaciones, secretos ni reglas de sesión.
