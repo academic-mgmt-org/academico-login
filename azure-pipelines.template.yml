@@ -91,6 +91,7 @@ parameters:
 # PORT and the image variable are intentionally omitted: PORT is read from the
 # existing remote .env when present, or from servicePort on first deployment,
 # while the image variable is generated from the current Build.BuildId.
+# The build also publishes latest for consumers that need the newest image tag.
 - name: envVariableNames
   type: string
   default: 'NODE_ENV SERVICE_API_KEY DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD'
@@ -147,6 +148,7 @@ stages:
         containerRegistry: ${{ parameters.dockerRegistryServiceConnection }}
         tags: |
           $(tag)
+          latest
         addPipelineData: false
 
 - stage: DeployDevelopment
