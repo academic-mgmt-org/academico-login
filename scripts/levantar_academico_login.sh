@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/.env}"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENV_FILE="${ENV_FILE:-${PROJECT_DIR}/.env}"
 IMAGE="${IMAGE:-guical96/academico-login:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-academico-login}"
 
