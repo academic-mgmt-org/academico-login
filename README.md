@@ -917,3 +917,101 @@ El **Authentication Service** concentra la política de login, emisión de token
 JWT y sesiones en un Core Asset reutilizable. En la plataforma actual, esto permite que
 `academico-web` y los microservicios existentes consuman una identidad común a través de
 `academico-gateway`, sin duplicar validaciones, secretos ni reglas de sesión.
+
+---
+
+# 19. Levantar el servicio con Docker Hub
+
+Esta opción permite desplegar `academico-login` desde la imagen publicada en Docker Hub:
+
+```bash
+docker pull guical96/academico-login:latest
+```
+
+## 19.1 Clonar el repositorio
+
+```bash
+git clone https://github.com/academic-mgmt-org/academico-login.git
+cd academico-login
+```
+
+## 19.2 Configurar variables de entorno
+
+Crear el archivo `.env` desde la plantilla y completar las variables requeridas:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Variables mínimas requeridas para levantar el contenedor:
+
+```env
+PORT=3001
+NODE_ENV=production
+LOGIN_API_KEY=<api-key-interna>
+JWT_SECRET=<secreto-jwt>
+JWT_DOC_SECRET=<secreto-documentacion>
+JWT_ACCESS_TTL=2h
+JWT_REFRESH_TTL=7d
+DB_HOST=<host-postgresql>
+DB_PORT=5432
+DB_DATABASE=<base-datos>
+DB_USER=<usuario>
+DB_PASSWORD=<password>
+```
+
+## 19.3 Ejecutar el script de despliegue
+
+Dar permisos de ejecución al script:
+
+```bash
+chmod +x scripts/levantar_academico_login.sh
+```
+
+Ejecutar el script:
+
+```bash
+./scripts/levantar_academico_login.sh
+```
+
+El script realiza las siguientes acciones:
+
+- Instala Docker si no está disponible en el sistema.
+- Inicia el servicio Docker.
+- Valida que exista `.env` con las variables obligatorias.
+- Descarga la imagen `guical96/academico-login:latest`.
+- Crea o reemplaza el contenedor `academico-login`.
+- Expone el puerto definido en `PORT`.
+
+## 19.4 Comandos útiles
+
+Verificar el contenedor:
+
+```bash
+docker ps --filter "name=academico-login"
+```
+
+Ver logs:
+
+```bash
+docker logs -f academico-login
+```
+
+Detener el servicio:
+
+```bash
+docker stop academico-login
+```
+
+Eliminar el contenedor:
+
+```bash
+docker rm -f academico-login
+```
+
+Ejecutar con otro puerto del host, manteniendo el puerto interno configurado en `.env`:
+
+```bash
+HOST_PORT=3002 ./scripts/levantar_academico_login.sh
+```
