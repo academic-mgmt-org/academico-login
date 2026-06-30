@@ -138,4 +138,29 @@ describe('AuthService', () => {
       applications: [],
     });
   });
+
+  it('cierra todas las sesiones activas del usuario al hacer logout', async () => {
+    jwtService.verifyAsync.mockResolvedValueOnce({
+      sub: 'user-1',
+      email: 'estudiante@utn.edu.ec',
+      sessionId: 'SESSION-LOGOUT',
+      tokenUse: 'refresh',
+    });
+    mockPool.query.mockResolvedValueOnce({ rowCount: 3 });
+
+    await expect(
+      service.logout({ refreshToken: 'refresh-SESSION-LOGOUT' }),
+    ).resolves.toMatchObject({
+      success: true,
+      revoked: true,
+      message: 'Sesion cerrada correctamente',
+    });
+
+    expect(mockPool.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE academico.auth_sessions'),
+      ['user-1', 'estudiante@utn.edu.ec'],
+    );
+    expect(mockPool.query.mock.calls[0][0]).toContain('user_id = $1');
+    expect(mockPool.query.mock.calls[0][0]).toContain('LOWER(email) = $2');
+  });
 });

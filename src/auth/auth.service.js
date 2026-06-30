@@ -159,13 +159,11 @@ export class AuthService {
       });
     }
 
-    if (payload.sessionId) {
-      await this.revokeSession(getPool(), payload.sessionId);
-    }
+    const revoked = await this.revokeSessionsForPayload(getPool(), payload);
 
     return LogoutResponseDto.from({
       success: true,
-      revoked: Boolean(payload.sessionId),
+      revoked,
       message: 'Sesion cerrada correctamente',
     });
   }
@@ -532,6 +530,49 @@ export class AuthService {
         return;
       }
     }
+  }
+
+  async revokeSessionsForPayload(pool, payload = {}) {
+    const conditions = [];
+    const values = [];
+
+    const userId = payload.userId || payload.sub;
+    if (userId) {
+      values.push(String(userId));
+      conditions.push(`user_id = $${values.length}`);
+    }
+
+    if (payload.email) {
+      values.push(String(payload.email).toLowerCase());
+      conditions.push(`LOWER(email) = $${values.length}`);
+    }
+
+    if (conditions.length === 0) {
+      if (payload.sessionId) {
+        await this.revokeSession(pool, payload.sessionId);
+        return true;
+      }
+
+      return false;
+    }
+
+    try {
+      await pool.query(
+        `
+          UPDATE academico.auth_sessions
+          SET revoked_at = NOW(), last_used_at = NOW()
+          WHERE (${conditions.join(' OR ')})
+            AND revoked_at IS NULL
+        `,
+        values,
+      );
+    } catch (error) {
+      if (!this.isOptionalSessionPersistenceError(error)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   extractBearerToken(authorization) {
