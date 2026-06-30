@@ -42,7 +42,7 @@ Este servicio será responsable de:
 - Whitelist de rutas públicas.
 - Protección interna por `LOGIN_API_KEY`.
 - Registro opcional de sesiones en `academico.auth_sessions`.
-- Solicitud de recuperacion de contraseña con token hasheado y correo delegado a `academico-notificaciones`.
+- Solicitud de recuperacion de contraseña con token hasheado y correo delegado a `academico-notificaciones` por `EmailService.SendEmail`.
 
 ---
 
