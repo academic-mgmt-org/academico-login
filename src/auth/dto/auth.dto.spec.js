@@ -1,5 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
+  ForgotPasswordRequestDto,
+  GenericResponseDto,
   LoginRequestDto,
   LogoutRequestDto,
   RefreshTokenRequestDto,
@@ -41,6 +43,24 @@ describe('Auth DTOs', () => {
     ).toMatchObject({
       refreshToken: 'refresh-2',
     });
+  });
+
+  it('normaliza ForgotPasswordRequestDto y GenericResponseDto', () => {
+    expect(
+      ForgotPasswordRequestDto.from({ email: ' ESTUDIANTE@UTN.EDU.EC ' }),
+    ).toEqual({
+      email: 'estudiante@utn.edu.ec',
+    });
+
+    expect(GenericResponseDto.from({ success: true, message: 'ok' })).toEqual({
+      success: true,
+      message: 'ok',
+    });
+  });
+
+  it('rechaza ForgotPasswordRequestDto invalido', () => {
+    expect(() => ForgotPasswordRequestDto.from({ email: 'correo-invalido' }))
+      .toThrow(BadRequestException);
   });
 
   it('mapea LogoutRequestDto sin exigir token para permitir fallback por header', () => {

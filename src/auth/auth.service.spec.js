@@ -12,6 +12,7 @@ describe('AuthService', () => {
   const originalEnv = { ...process.env };
   let mockPool;
   let jwtService;
+  let passwordResetNotifier;
   let service;
 
   const userRow = {
@@ -47,7 +48,15 @@ describe('AuthService', () => {
       verifyAsync: jest.fn(),
     };
 
-    service = new AuthService(jwtService);
+    passwordResetNotifier = {
+      sendPasswordResetEmail: jest.fn().mockResolvedValue({
+        success: true,
+        provider: 'log',
+        messageId: 'msg-1',
+      }),
+    };
+
+    service = new AuthService(jwtService, passwordResetNotifier);
   });
 
   afterEach(() => {
@@ -162,5 +171,60 @@ describe('AuthService', () => {
     );
     expect(mockPool.query.mock.calls[0][0]).toContain('user_id = $1');
     expect(mockPool.query.mock.calls[0][0]).toContain('LOWER(email) = $2');
+  });
+
+  it('solicita recuperacion de contraseña sin revelar si el correo no existe', async () => {
+    mockPool.query.mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      service.forgotPassword({ email: 'desconocido@utn.edu.ec' }),
+    ).resolves.toMatchObject({
+      success: true,
+      message: 'Si el correo existe, enviaremos un enlace para recuperar la contraseña.',
+    });
+
+    expect(passwordResetNotifier.sendPasswordResetEmail).not.toHaveBeenCalled();
+    expect(mockPool.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('genera token hasheado y delega envio de correo de recuperacion', async () => {
+    process.env.PASSWORD_RESET_URL = 'https://academico.test/reset-password';
+    process.env.PASSWORD_RESET_TTL_MINUTES = '45';
+    process.env.PASSWORD_RESET_THROTTLE_SECONDS = '60';
+
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [userRow] })
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rowCount: 1 });
+
+    await expect(
+      service.forgotPassword(
+        { email: ' Estudiante@UTN.EDU.EC ' },
+        { ipAddress: '127.0.0.1', userAgent: 'jest' },
+      ),
+    ).resolves.toMatchObject({
+      success: true,
+    });
+
+    const insertParams = mockPool.query.mock.calls[4][1];
+    expect(insertParams[0]).toBe('user-1');
+    expect(insertParams[1]).toBe('estudiante@utn.edu.ec');
+    expect(insertParams[2]).toMatch(/^[a-f0-9]{64}$/);
+    expect(insertParams[3]).toBe('127.0.0.1');
+    expect(insertParams[4]).toBe('jest');
+
+    expect(passwordResetNotifier.sendPasswordResetEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usuarioId: 'user-1',
+        email: 'estudiante@utn.edu.ec',
+        nombre: 'Estudiante Prueba',
+        expiresInMinutes: 45,
+      }),
+    );
+    expect(
+      passwordResetNotifier.sendPasswordResetEmail.mock.calls[0][0].resetUrl,
+    ).toContain('https://academico.test/reset-password?token=');
   });
 });

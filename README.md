@@ -42,6 +42,7 @@ Este servicio será responsable de:
 - Whitelist de rutas públicas.
 - Protección interna por `LOGIN_API_KEY`.
 - Registro opcional de sesiones en `academico.auth_sessions`.
+- Solicitud de recuperacion de contraseña con token hasheado y correo delegado a `academico-notificaciones`.
 
 ---
 
@@ -51,7 +52,7 @@ Este servicio será responsable de:
 - Actualización de usuarios.
 - Asignación administrativa de roles.
 - Gestión de organizaciones.
-- Recuperación de contraseña.
+- Envio directo de correos transaccionales.
 - MFA avanzado.
 - Administración de permisos.
 

@@ -6,9 +6,12 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { createHash, randomUUID, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import getPool from '../db';
+import { PasswordResetNotifierService } from './password-reset-notifier.service';
 import {
+  ForgotPasswordRequestDto,
+  GenericResponseDto,
   LoginRequestDto,
   LoginResponseDto,
   LogoutRequestDto,
@@ -19,14 +22,22 @@ import {
 
 const AUTH_ERROR_MESSAGE =
   'Usuario o contraseña incorrectos. Verifique sus credenciales.';
+const PASSWORD_RESET_GENERIC_MESSAGE =
+  'Si el correo existe, enviaremos un enlace para recuperar la contraseña.';
 const DEFAULT_ACCESS_TOKEN_TTL = '2h';
 const DEFAULT_REFRESH_TOKEN_TTL = '7d';
+const DEFAULT_PASSWORD_RESET_TTL_MINUTES = 30;
+const DEFAULT_PASSWORD_RESET_THROTTLE_SECONDS = 60;
 const OPTIONAL_SESSION_ERROR_CODES = new Set(['42P01', '42703', '3F000']);
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(JwtService) jwtService) {
+  constructor(
+    @Inject(JwtService) jwtService,
+    @Inject(PasswordResetNotifierService) passwordResetNotifier,
+  ) {
     this.jwtService = jwtService;
+    this.passwordResetNotifier = passwordResetNotifier;
   }
 
   async login(loginRequest, requestContext = {}) {
@@ -133,6 +144,55 @@ export class AuthService {
       mfaRequired: false,
       requiresAppUpdate: false,
     });
+  }
+
+  async forgotPassword(forgotPasswordRequest, requestContext = {}) {
+    const request = ForgotPasswordRequestDto.from(forgotPasswordRequest);
+    const response = GenericResponseDto.from({
+      success: true,
+      message: PASSWORD_RESET_GENERIC_MESSAGE,
+    });
+
+    const pool = getPool();
+    const userRow = await this.findActiveUserForPasswordReset(
+      pool,
+      request.email,
+    );
+
+    if (!userRow) {
+      return response;
+    }
+
+    await this.ensurePasswordResetSchema(pool);
+
+    if (await this.isPasswordResetThrottled(pool, request.email)) {
+      return response;
+    }
+
+    const rawToken = this.createPasswordResetToken();
+    const tokenHash = this.sha256(rawToken);
+    const expiresInMinutes = this.getPasswordResetTtlMinutes();
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+    const resetUrl = this.buildPasswordResetUrl(rawToken, userRow.email);
+
+    await this.storePasswordResetToken(pool, {
+      userId: String(userRow.usuario_id),
+      email: userRow.email,
+      tokenHash,
+      expiresAt,
+      ipAddress: requestContext.ipAddress,
+      userAgent: requestContext.userAgent,
+    });
+
+    await this.passwordResetNotifier.sendPasswordResetEmail({
+      usuarioId: String(userRow.usuario_id),
+      email: userRow.email,
+      nombre: this.getDisplayName(userRow),
+      resetUrl,
+      expiresInMinutes,
+    });
+
+    return response;
   }
 
   async logout(logoutRequest = {}, authorization) {
@@ -245,6 +305,109 @@ export class AuthService {
         'Error al consultar el usuario en la base de datos: ' + error.message,
       );
     }
+  }
+
+  async findActiveUserForPasswordReset(pool, email) {
+    const query = `
+      SELECT
+        u.id AS usuario_id,
+        u.nombres,
+        u.apellidos,
+        u.email,
+        u.identificacion,
+        u.estado
+      FROM academico.usuarios u
+      WHERE LOWER(u.email) = $1 AND LOWER(u.estado) = 'activo'
+      LIMIT 1
+    `;
+
+    try {
+      const { rows } = await pool.query(query, [email.toLowerCase()]);
+      return rows[0] || null;
+    } catch (error) {
+      throw new BadRequestException(
+        'Error al consultar el usuario en la base de datos: ' + error.message,
+      );
+    }
+  }
+
+  async ensurePasswordResetSchema(pool) {
+    await pool.query(`
+      CREATE SCHEMA IF NOT EXISTS academico;
+
+      CREATE TABLE IF NOT EXISTS academico.password_reset_tokens (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        email VARCHAR(150) NOT NULL,
+        token_hash CHAR(64) NOT NULL UNIQUE,
+        request_ip VARCHAR(64),
+        user_agent TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_email
+        ON academico.password_reset_tokens (LOWER(email));
+
+      CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_active
+        ON academico.password_reset_tokens (token_hash, expires_at)
+        WHERE used_at IS NULL;
+    `);
+  }
+
+  async isPasswordResetThrottled(pool, email) {
+    const throttleSeconds = this.getPasswordResetThrottleSeconds();
+    if (throttleSeconds <= 0) {
+      return false;
+    }
+
+    const { rows } = await pool.query(
+      `
+        SELECT 1
+        FROM academico.password_reset_tokens
+        WHERE LOWER(email) = $1
+          AND created_at > NOW() - ($2::int * INTERVAL '1 second')
+        LIMIT 1
+      `,
+      [email.toLowerCase(), throttleSeconds],
+    );
+
+    return rows.length > 0;
+  }
+
+  async storePasswordResetToken(pool, reset) {
+    await pool.query(
+      `
+        UPDATE academico.password_reset_tokens
+        SET used_at = COALESCE(used_at, NOW())
+        WHERE LOWER(email) = $1
+          AND used_at IS NULL
+      `,
+      [reset.email.toLowerCase()],
+    );
+
+    await pool.query(
+      `
+        INSERT INTO academico.password_reset_tokens (
+          user_id,
+          email,
+          token_hash,
+          request_ip,
+          user_agent,
+          expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [
+        reset.userId,
+        reset.email.toLowerCase(),
+        reset.tokenHash,
+        reset.ipAddress || null,
+        reset.userAgent || null,
+        reset.expiresAt,
+      ],
+    );
   }
 
   normalizeLoginRequest(loginRequest) {
@@ -597,6 +760,35 @@ export class AuthService {
     return 'SESSION-' + randomUUID().toUpperCase();
   }
 
+  createPasswordResetToken() {
+    return randomBytes(32).toString('base64url');
+  }
+
+  buildPasswordResetUrl(token, email) {
+    const baseUrl =
+      process.env.PASSWORD_RESET_URL ||
+      process.env.ACADEMICO_WEB_PASSWORD_RESET_URL ||
+      process.env.ACADEMICO_WEB_URL ||
+      'http://localhost/reset-password';
+
+    try {
+      const url = new URL(baseUrl);
+      url.searchParams.set('token', token);
+      url.searchParams.set('email', email);
+      return url.toString();
+    } catch (error) {
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      return `${baseUrl}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+    }
+  }
+
+  getDisplayName(userRow) {
+    return (
+      [userRow.nombres, userRow.apellidos].filter(Boolean).join(' ').trim() ||
+      userRow.email
+    );
+  }
+
   getJwtSecret() {
     return process.env.JWT_SECRET || process.env.JWT_DOC_SECRET || 'utn-secret-key-123';
   }
@@ -607,6 +799,28 @@ export class AuthService {
 
   getRefreshTokenTtl() {
     return process.env.JWT_REFRESH_TTL || DEFAULT_REFRESH_TOKEN_TTL;
+  }
+
+  getPasswordResetTtlMinutes() {
+    const parsed = parseInt(
+      process.env.PASSWORD_RESET_TTL_MINUTES ||
+        String(DEFAULT_PASSWORD_RESET_TTL_MINUTES),
+      10,
+    );
+    return Number.isFinite(parsed) && parsed > 0
+      ? Math.min(parsed, 1440)
+      : DEFAULT_PASSWORD_RESET_TTL_MINUTES;
+  }
+
+  getPasswordResetThrottleSeconds() {
+    const parsed = parseInt(
+      process.env.PASSWORD_RESET_THROTTLE_SECONDS ||
+        String(DEFAULT_PASSWORD_RESET_THROTTLE_SECONDS),
+      10,
+    );
+    return Number.isFinite(parsed) && parsed >= 0
+      ? Math.min(parsed, 3600)
+      : DEFAULT_PASSWORD_RESET_THROTTLE_SECONDS;
   }
 
   expiresAtFromTtl(ttl) {

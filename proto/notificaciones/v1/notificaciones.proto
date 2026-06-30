@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package notificaciones.v1;
+
+message EmailMetadata {
+  string key = 1;
+  string value = 2;
+}
+
+message SendEmailRequest {
+  string usuario_id = 1;
+  string to_email = 2;
+  string to_name = 3;
+  string subject = 4;
+  string plain_text = 5;
+  string html = 6;
+  string tipo = 7;
+  string prioridad = 8;
+  string source = 9;
+  repeated EmailMetadata metadata = 10;
+}
+
+message SendEmailResponse {
+  bool success = 1;
+  string message = 2;
+  string provider = 3;
+  string message_id = 4;
+}
+
+service EmailService {
+  rpc SendEmail(SendEmailRequest) returns (SendEmailResponse) {}
+}

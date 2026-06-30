@@ -10,6 +10,7 @@ import { join } from 'path';
 import {
   LoginRequestDto,
   LogoutRequestDto,
+  ForgotPasswordRequestDto,
   RequestContextDto,
   RefreshTokenRequestDto,
   ValidateTokenRequestDto,
@@ -18,6 +19,7 @@ import {
 const WHITELIST_ROUTES = [
   '/login/api/v1/auth/login',
   '/login/api/v1/auth/refresh',
+  '/login/api/v1/auth/forgot-password',
 ];
 
 function toConnectError(err) {
@@ -121,6 +123,22 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
           RefreshTokenRequestDto.from(req),
         );
         return toLoginResponse(result);
+      } catch (err) {
+        throw toConnectError(err);
+      }
+    },
+
+    async forgotPassword(req, context) {
+      try {
+        const result = await authService.forgotPassword(
+          ForgotPasswordRequestDto.from(req),
+          toRequestContext(context),
+        );
+        return {
+          success: result.success,
+          message: result.message || '',
+          revoked: false,
+        };
       } catch (err) {
         throw toConnectError(err);
       }

@@ -88,6 +88,32 @@ export class RefreshTokenRequestDto {
   }
 }
 
+export class ForgotPasswordRequestDto {
+  constructor({ email }) {
+    this.email = email;
+  }
+
+  static from(value = {}) {
+    if (value instanceof ForgotPasswordRequestDto) {
+      return value;
+    }
+
+    const emailValue =
+      typeof value === 'string' ? value : pickFirst(value, ['email', 'username']);
+
+    if (!emailValue) {
+      throw new BadRequestException('Correo electronico es requerido');
+    }
+
+    const email = String(emailValue).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('Correo electronico invalido');
+    }
+
+    return new ForgotPasswordRequestDto({ email });
+  }
+}
+
 export class LogoutRequestDto {
   constructor({ token, refreshToken }) {
     assignIfDefined(this, 'token', token);
@@ -217,5 +243,20 @@ export class LogoutResponseDto {
     }
 
     return new LogoutResponseDto(value);
+  }
+}
+
+export class GenericResponseDto {
+  constructor({ success, message }) {
+    this.success = Boolean(success);
+    assignIfDefined(this, 'message', message);
+  }
+
+  static from(value = {}) {
+    if (value instanceof GenericResponseDto) {
+      return value;
+    }
+
+    return new GenericResponseDto(value);
   }
 }
