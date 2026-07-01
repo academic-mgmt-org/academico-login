@@ -11,8 +11,7 @@ export class PasswordResetNotifierService {
   constructor() {
     this.client = null;
     this.clientBaseUrl = null;
-    this.grpcClient = null;
-    this.grpcTarget = null;
+    this.grpcEmailService = null;
   }
 
   async sendPasswordResetEmail(payload) {
@@ -64,7 +63,7 @@ export class PasswordResetNotifierService {
   }
 
   getClient() {
-    const baseUrl = process.env.BASE_URL;
+    const baseUrl = this.getGatewayTarget();
 
     if (!baseUrl) {
       throw new InternalServerErrorException(
@@ -89,7 +88,36 @@ export class PasswordResetNotifierService {
   }
 
   getGrpcClient(target) {
-    if (!this.grpcClient || this.grpcTarget !== target) {
+    const EmailServiceClient = this.getGrpcEmailService();
+
+    return {
+      sendEmail: (email) =>
+        new Promise((resolve, reject) => {
+          const client = new EmailServiceClient(
+            target,
+            grpc.credentials.createInsecure(),
+            this.getGrpcChannelOptions(),
+          );
+
+          client.sendEmail(
+            email,
+            { deadline: this.getGrpcDeadline() },
+            (error, response) => {
+              client.close();
+
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve(response);
+            },
+          );
+        }),
+    };
+  }
+
+  getGrpcEmailService() {
+    if (!this.grpcEmailService) {
       const packageDefinition = protoLoader.loadSync(
         join(__dirname, '../proto/notificaciones/v1/notificaciones.proto'),
         {
@@ -104,28 +132,23 @@ export class PasswordResetNotifierService {
         packageDefinition,
       ).notificaciones.v1;
 
-      this.grpcClient = new notificacionesProto.EmailService(
-        target,
-        grpc.credentials.createInsecure(),
-      );
-      this.grpcTarget = target;
+      this.grpcEmailService = notificacionesProto.EmailService;
     }
 
+    return this.grpcEmailService;
+  }
+
+  getGatewayTarget() {
+    return process.env.NOTIFICATIONS_GATEWAY_TARGET || process.env.BASE_URL;
+  }
+
+  getGrpcChannelOptions() {
     return {
-      sendEmail: (email) =>
-        new Promise((resolve, reject) => {
-          this.grpcClient.sendEmail(
-            email,
-            { deadline: this.getGrpcDeadline() },
-            (error, response) => {
-              if (error) {
-                reject(error);
-                return;
-              }
-              resolve(response);
-            },
-          );
-        }),
+      'grpc.keepalive_time_ms': 20000,
+      'grpc.keepalive_timeout_ms': 5000,
+      'grpc.keepalive_permit_without_calls': 1,
+      'grpc.initial_reconnect_backoff_ms': 1000,
+      'grpc.max_reconnect_backoff_ms': 5000,
     };
   }
 

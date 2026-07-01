@@ -5,10 +5,12 @@ import * as protoLoader from '@grpc/proto-loader';
 import { PasswordResetNotifierService } from './password-reset-notifier.service';
 
 const mockSendEmail = jest.fn();
+const mockClose = jest.fn();
 const mockEmailService = jest.fn(function emailService(target, credentials) {
   this.target = target;
   this.credentials = credentials;
   this.sendEmail = mockSendEmail;
+  this.close = mockClose;
 });
 
 jest.mock('@connectrpc/connect', () => ({
@@ -44,23 +46,50 @@ describe('PasswordResetNotifierService', () => {
     jest.clearAllMocks();
   });
 
-  it('usa BASE_URL como target gRPC del gateway', () => {
+  it('usa BASE_URL como target gRPC del gateway', async () => {
     process.env = {
       ...originalEnv,
       BASE_URL: 'academia-dev.eastus2.cloudapp.azure.com:50050',
     };
+    mockSendEmail.mockImplementation((_email, _options, callback) =>
+      callback(null, { success: true }),
+    );
 
     const service = new PasswordResetNotifierService();
-    service.getClient();
+    await service.getClient().sendEmail({});
 
     expect(protoLoader.loadSync).toHaveBeenCalled();
     expect(grpc.credentials.createInsecure).toHaveBeenCalled();
     expect(mockEmailService).toHaveBeenCalledWith(
       'academia-dev.eastus2.cloudapp.azure.com:50050',
       'insecure-credentials',
+      expect.objectContaining({
+        'grpc.keepalive_time_ms': 20000,
+      }),
     );
+    expect(mockClose).toHaveBeenCalled();
     expect(createConnectTransport).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it('permite usar un target IPv4 del gateway sin cambiar BASE_URL', async () => {
+    process.env = {
+      ...originalEnv,
+      BASE_URL: 'academia-dev.eastus2.cloudapp.azure.com:50050',
+      NOTIFICATIONS_GATEWAY_TARGET: '20.122.210.230:50050',
+    };
+    mockSendEmail.mockImplementation((_email, _options, callback) =>
+      callback(null, { success: true }),
+    );
+
+    const service = new PasswordResetNotifierService();
+    await service.getClient().sendEmail({});
+
+    expect(mockEmailService).toHaveBeenCalledWith(
+      '20.122.210.230:50050',
+      'insecure-credentials',
+      expect.any(Object),
+    );
   });
 
   it('usa HTTP/2 si BASE_URL es un endpoint HTTP Connect', () => {
