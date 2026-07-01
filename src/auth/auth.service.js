@@ -3,6 +3,7 @@ import {
   Injectable,
   BadRequestException,
   InternalServerErrorException,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -45,6 +46,7 @@ export class AuthService {
   ) {
     this.jwtService = jwtService;
     this.passwordResetNotifier = passwordResetNotifier;
+    this.logger = new Logger(AuthService.name);
   }
 
   async login(loginRequest, requestContext = {}) {
@@ -191,7 +193,7 @@ export class AuthService {
       userAgent: requestContext.userAgent,
     });
 
-    await this.passwordResetNotifier.sendPasswordResetEmail({
+    this.dispatchPasswordResetEmail({
       usuarioId: String(userRow.usuario_id),
       email: userRow.email,
       nombre: this.getDisplayName(userRow),
@@ -200,6 +202,19 @@ export class AuthService {
     });
 
     return response;
+  }
+
+  dispatchPasswordResetEmail(payload) {
+    const sendPromise =
+      this.passwordResetNotifier.sendPasswordResetEmail(payload);
+
+    if (sendPromise && typeof sendPromise.catch === 'function') {
+      sendPromise.catch((error) => {
+        this.logger.error(
+          `Error enviando correo de recuperacion: ${error.message || error}`,
+        );
+      });
+    }
   }
 
   async resetPassword(resetPasswordRequest) {

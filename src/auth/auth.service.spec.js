@@ -235,6 +235,35 @@ describe('AuthService', () => {
     ).toContain('https://academico.test/reset-password?token=');
   });
 
+  it('no bloquea la respuesta si falla el envio asincrono de correo', async () => {
+    process.env.BASE_URL = 'https://academico.test';
+    service.logger.error = jest.fn();
+    passwordResetNotifier.sendPasswordResetEmail.mockRejectedValueOnce(
+      new Error('provider timeout'),
+    );
+
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [userRow] })
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rowCount: 1 });
+
+    await expect(
+      service.forgotPassword({ email: 'estudiante@utn.edu.ec' }),
+    ).resolves.toMatchObject({
+      success: true,
+    });
+
+    expect(passwordResetNotifier.sendPasswordResetEmail).toHaveBeenCalled();
+
+    await Promise.resolve();
+
+    expect(service.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('provider timeout'),
+    );
+  });
+
   it('restablece contraseña con token de recuperacion y revoca sesiones', async () => {
     process.env.PASSWORD_BCRYPT_ROUNDS = '4';
 
