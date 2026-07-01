@@ -76,7 +76,7 @@ export class PasswordResetNotifierService {
       if (!this.client || this.clientBaseUrl !== baseUrl) {
         const transport = createConnectTransport({
           baseUrl,
-          httpVersion: '1.1',
+          httpVersion: '2',
         });
         this.client = createClient(EmailService, transport);
         this.clientBaseUrl = baseUrl;
@@ -135,10 +135,10 @@ export class PasswordResetNotifierService {
 
   getGrpcDeadline() {
     const parsed = parseInt(
-      process.env.NOTIFICATIONS_GRPC_TIMEOUT_MS || '15000',
+      process.env.NOTIFICATIONS_GRPC_TIMEOUT_MS || '60000',
       10,
     );
-    const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
+    const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
     return new Date(Date.now() + timeoutMs);
   }
 
