@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   BadRequestException,
+  InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -896,20 +897,23 @@ export class AuthService {
   }
 
   buildPasswordResetUrl(token, email) {
-    const baseUrl =
-      process.env.PASSWORD_RESET_URL ||
-      process.env.ACADEMICO_WEB_PASSWORD_RESET_URL ||
-      process.env.ACADEMICO_WEB_URL ||
-      'http://localhost/reset-password';
+    const baseUrl = process.env.BASE_URL;
+
+    if (!baseUrl) {
+      throw new InternalServerErrorException(
+        'BASE_URL no configurado para recuperacion de contraseña',
+      );
+    }
 
     try {
-      const url = new URL(baseUrl);
+      const url = new URL('/reset-password', baseUrl);
       url.searchParams.set('token', token);
       url.searchParams.set('email', email);
       return url.toString();
     } catch (error) {
-      const separator = baseUrl.includes('?') ? '&' : '?';
-      return `${baseUrl}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+      const resetUrl = `${baseUrl.replace(/\/+$/, '')}/reset-password`;
+      const separator = resetUrl.includes('?') ? '&' : '?';
+      return `${resetUrl}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
     }
   }
 

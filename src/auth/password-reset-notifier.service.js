@@ -59,25 +59,18 @@ export class PasswordResetNotifierService {
   }
 
   getClient() {
-    const baseUrl = process.env.NOTIFICACIONES_BASE_URL;
-    const apiKey = process.env.NOTIFICACIONES_API_KEY;
+    const baseUrl = process.env.BASE_URL;
 
-    if (!baseUrl || !apiKey) {
+    if (!baseUrl) {
       throw new InternalServerErrorException(
-        'Servicio de notificaciones no configurado para recuperacion de contraseña',
+        'BASE_URL no configurado para solicitudes via gateway',
       );
     }
 
     if (!this.client || this.clientBaseUrl !== baseUrl) {
       const transport = createConnectTransport({
         baseUrl,
-        httpVersion: '2',
-        interceptors: [
-          (next) => async (req) => {
-            req.header.set('x-api-key', apiKey);
-            return await next(req);
-          },
-        ],
+        httpVersion: '1.1',
       });
       this.client = createClient(EmailService, transport);
       this.clientBaseUrl = baseUrl;

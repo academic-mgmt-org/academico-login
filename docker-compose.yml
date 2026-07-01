@@ -1,5 +1,7 @@
 services:
   academico-login:
+    build:
+      context: .
     image: ${ACADEMICO_LOGIN_IMAGE}
     container_name: academico-login
     restart: always

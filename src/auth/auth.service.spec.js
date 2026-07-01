@@ -195,7 +195,7 @@ describe('AuthService', () => {
   });
 
   it('genera token hasheado y delega envio de correo de recuperacion', async () => {
-    process.env.PASSWORD_RESET_URL = 'https://academico.test/reset-password';
+    process.env.BASE_URL = 'https://academico.test';
     process.env.PASSWORD_RESET_TTL_MINUTES = '45';
     process.env.PASSWORD_RESET_THROTTLE_SECONDS = '60';
 
