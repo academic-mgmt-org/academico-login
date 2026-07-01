@@ -24,7 +24,7 @@ import {
 const AUTH_ERROR_MESSAGE =
   'Usuario o contraseña incorrectos. Verifique sus credenciales.';
 const PASSWORD_RESET_GENERIC_MESSAGE =
-  'Si el correo existe, enviaremos un enlace para recuperar la contraseña.';
+  'Si hay una cuenta asociada a ese correo, enviaremos instrucciones en los próximos minutos. Revisa también spam o correo no deseado. Si no recibes nada, verifica que escribiste el correo correcto o contacta soporte académico.';
 const PASSWORD_RESET_INVALID_MESSAGE =
   'Token de recuperacion invalido o expirado';
 const PASSWORD_RESET_SUCCESS_MESSAGE = 'Contraseña actualizada correctamente';
