@@ -114,19 +114,32 @@ export class PasswordResetNotifierService {
     return {
       sendEmail: (email) =>
         new Promise((resolve, reject) => {
-          this.grpcClient.sendEmail(email, (error, response) => {
-            if (error) {
-              reject(error);
-              return;
-            }
-            resolve(response);
-          });
+          this.grpcClient.sendEmail(
+            email,
+            { deadline: this.getGrpcDeadline() },
+            (error, response) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve(response);
+            },
+          );
         }),
     };
   }
 
   isHttpUrl(value) {
     return /^https?:\/\//i.test(String(value || ''));
+  }
+
+  getGrpcDeadline() {
+    const parsed = parseInt(
+      process.env.NOTIFICATIONS_GRPC_TIMEOUT_MS || '15000',
+      10,
+    );
+    const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
+    return new Date(Date.now() + timeoutMs);
   }
 
   passwordResetHtml(payload) {
