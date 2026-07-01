@@ -897,7 +897,7 @@ export class AuthService {
   }
 
   buildPasswordResetUrl(token, email) {
-    const baseUrl = process.env.BASE_URL;
+    const baseUrl = this.getPasswordResetBaseUrl();
 
     if (!baseUrl) {
       throw new InternalServerErrorException(
@@ -915,6 +915,25 @@ export class AuthService {
       const separator = resetUrl.includes('?') ? '&' : '?';
       return `${resetUrl}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
     }
+  }
+
+  getPasswordResetBaseUrl() {
+    const explicitBaseUrl =
+      process.env.PASSWORD_RESET_BASE_URL ||
+      process.env.PUBLIC_BASE_URL ||
+      process.env.FRONTEND_BASE_URL;
+
+    if (explicitBaseUrl) {
+      return explicitBaseUrl;
+    }
+
+    const baseUrl = process.env.BASE_URL;
+    if (!baseUrl || /^https?:\/\//i.test(baseUrl)) {
+      return baseUrl;
+    }
+
+    const host = String(baseUrl).split(':')[0];
+    return host ? `https://${host}` : baseUrl;
   }
 
   getDisplayName(userRow) {

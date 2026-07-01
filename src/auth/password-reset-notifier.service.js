@@ -1,6 +1,9 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { createClient } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-node';
+import * as grpc from '@grpc/grpc-js';
+import * as protoLoader from '@grpc/proto-loader';
+import { join } from 'path';
 import { EmailService } from '../gen/proto/notificaciones/v1/notificaciones_pb.js';
 
 @Injectable()
@@ -8,6 +11,8 @@ export class PasswordResetNotifierService {
   constructor() {
     this.client = null;
     this.clientBaseUrl = null;
+    this.grpcClient = null;
+    this.grpcTarget = null;
   }
 
   async sendPasswordResetEmail(payload) {
@@ -67,16 +72,61 @@ export class PasswordResetNotifierService {
       );
     }
 
-    if (!this.client || this.clientBaseUrl !== baseUrl) {
-      const transport = createConnectTransport({
-        baseUrl,
-        httpVersion: '1.1',
-      });
-      this.client = createClient(EmailService, transport);
-      this.clientBaseUrl = baseUrl;
+    if (this.isHttpUrl(baseUrl)) {
+      if (!this.client || this.clientBaseUrl !== baseUrl) {
+        const transport = createConnectTransport({
+          baseUrl,
+          httpVersion: '1.1',
+        });
+        this.client = createClient(EmailService, transport);
+        this.clientBaseUrl = baseUrl;
+      }
+
+      return this.client;
     }
 
-    return this.client;
+    return this.getGrpcClient(baseUrl);
+  }
+
+  getGrpcClient(target) {
+    if (!this.grpcClient || this.grpcTarget !== target) {
+      const packageDefinition = protoLoader.loadSync(
+        join(__dirname, '../proto/notificaciones/v1/notificaciones.proto'),
+        {
+          keepCase: false,
+          longs: String,
+          enums: String,
+          defaults: true,
+          oneofs: true,
+        },
+      );
+      const notificacionesProto = grpc.loadPackageDefinition(
+        packageDefinition,
+      ).notificaciones.v1;
+
+      this.grpcClient = new notificacionesProto.EmailService(
+        target,
+        grpc.credentials.createInsecure(),
+      );
+      this.grpcTarget = target;
+    }
+
+    return {
+      sendEmail: (email) =>
+        new Promise((resolve, reject) => {
+          this.grpcClient.sendEmail(email, (error, response) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve(response);
+          });
+        }),
+    };
+  }
+
+  isHttpUrl(value) {
+    return /^https?:\/\//i.test(String(value || ''));
   }
 
   passwordResetHtml(payload) {

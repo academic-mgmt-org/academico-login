@@ -4,6 +4,6 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true,
-    "assets": ["gen/descriptor.bin"]
+    "assets": ["gen/descriptor.bin", "proto/**/*.proto"]
   }
 }

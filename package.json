@@ -29,6 +29,8 @@
     "@connectrpc/connect-express": "^2.1.2",
     "@connectrpc/connect-fastify": "^2.1.2",
     "@connectrpc/connect-node": "^2.1.2",
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "@lambdalisue/connectrpc-grpcreflect": "^0.5.0",
     "@nestjs-modules/ioredis": "^2.0.2",
     "@nestjs/cache-manager": "^2.3.0",
