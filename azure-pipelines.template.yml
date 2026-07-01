@@ -96,6 +96,13 @@ parameters:
   type: string
   default: 'NODE_ENV SERVICE_API_KEY DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD'
 
+# Space-separated list of .env keys that the generator should leave server-local
+# during automatic discovery. These keys are preserved from the existing remote
+# .env by the deploy script instead of being required as Azure DevOps variables.
+- name: preservedEnvVariableNames
+  type: string
+  default: 'BASE_URL PASSWORD_RESET_TTL_MINUTES PASSWORD_RESET_THROTTLE_SECONDS'
+
 # Values injected into the .env creation step. Use Azure DevOps secret variables
 # for sensitive values and plain literals for non-sensitive values.
 - name: envVariables
@@ -188,6 +195,41 @@ stages:
           fi
         }
 
+        merge_env_file() {
+          local existing_file="$1"
+          local generated_file="$2"
+          local output_file="$3"
+
+          if [ -f "$existing_file" ]; then
+            awk '
+              FNR == NR {
+                if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                  split($0, parts, "=")
+                  managed[parts[1]] = 1
+                }
+                generated[++generated_count] = $0
+                next
+              }
+              {
+                if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                  split($0, parts, "=")
+                  if (parts[1] in managed) {
+                    next
+                  }
+                }
+                print
+              }
+              END {
+                for (i = 1; i <= generated_count; i++) {
+                  print generated[i]
+                }
+              }
+            ' "$generated_file" "$existing_file" > "$output_file"
+          else
+            cp "$generated_file" "$output_file"
+          fi
+        }
+
         validate_env_name "$IMAGE_ENV_VARIABLE_NAME"
 
         for name in $ENV_VARIABLE_NAMES; do
@@ -196,10 +238,11 @@ stages:
         done
 
         IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
+        ENV_FILE_GENERATED="$(mktemp)"
         ENV_FILE_LOCAL="$(mktemp)"
 
         cleanup() {
-          rm -f "$ENV_FILE_LOCAL"
+          rm -f "$ENV_FILE_GENERATED" "$ENV_FILE_LOCAL"
         }
         trap cleanup EXIT
 
@@ -238,7 +281,9 @@ stages:
           for name in $ENV_VARIABLE_NAMES; do
             printf '%s=%s\n' "$name" "${!name}"
           done
-        } > "$ENV_FILE_LOCAL"
+        } > "$ENV_FILE_GENERATED"
+
+        merge_env_file "$ENV_FILE" "$ENV_FILE_GENERATED" "$ENV_FILE_LOCAL"
 
         echo "Updating development .env and compose file..."
         mv "$ENV_FILE_LOCAL" "$REMOTE_APP_PATH/.env.pipeline"
@@ -446,7 +491,46 @@ stages:
 
         echo "Updating production .env and compose file..."
         ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p '$REMOTE_APP_PATH' && umask 077 && cat > '$REMOTE_APP_PATH/.env.pipeline'" < "$ENV_FILE_LOCAL"
-        ssh "${SSH_OPTS[@]}" "$REMOTE" "mv '$REMOTE_APP_PATH/.env.pipeline' '$REMOTE_APP_PATH/.env' && chmod 600 '$REMOTE_APP_PATH/.env'"
+        ssh "${SSH_OPTS[@]}" "$REMOTE" "REMOTE_APP_PATH='$REMOTE_APP_PATH' bash -se" << 'REMOTE_ENV_MERGE'
+        set -euo pipefail
+
+        ENV_FILE="$REMOTE_APP_PATH/.env"
+        GENERATED_FILE="$REMOTE_APP_PATH/.env.pipeline"
+        MERGED_FILE="$REMOTE_APP_PATH/.env.merged"
+
+        if [ -f "$ENV_FILE" ]; then
+          awk '
+            FNR == NR {
+              if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                split($0, parts, "=")
+                managed[parts[1]] = 1
+              }
+              generated[++generated_count] = $0
+              next
+            }
+            {
+              if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                split($0, parts, "=")
+                if (parts[1] in managed) {
+                  next
+                }
+              }
+              print
+            }
+            END {
+              for (i = 1; i <= generated_count; i++) {
+                print generated[i]
+              }
+            }
+          ' "$GENERATED_FILE" "$ENV_FILE" > "$MERGED_FILE"
+        else
+          cp "$GENERATED_FILE" "$MERGED_FILE"
+        fi
+
+        mv "$MERGED_FILE" "$ENV_FILE"
+        rm -f "$GENERATED_FILE"
+        chmod 600 "$ENV_FILE"
+        REMOTE_ENV_MERGE
         ssh "${SSH_OPTS[@]}" "$REMOTE" "cat > '$REMOTE_APP_PATH/$PROD_COMPOSE_FILE'" < "$COMPOSE_SOURCE_FILE"
 
         echo "Deploying with Docker Compose..."
