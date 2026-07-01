@@ -13,6 +13,7 @@ import {
   ForgotPasswordRequestDto,
   RequestContextDto,
   RefreshTokenRequestDto,
+  ResetPasswordRequestDto,
   ValidateTokenRequestDto,
 } from './auth/dto/auth.dto.js';
 
@@ -20,6 +21,7 @@ const WHITELIST_ROUTES = [
   '/login/api/v1/auth/login',
   '/login/api/v1/auth/refresh',
   '/login/api/v1/auth/forgot-password',
+  '/login/api/v1/auth/reset-password',
 ];
 
 function toConnectError(err) {
@@ -133,6 +135,26 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
         const result = await authService.forgotPassword(
           ForgotPasswordRequestDto.from(req),
           toRequestContext(context),
+        );
+        return {
+          success: result.success,
+          message: result.message || '',
+          revoked: false,
+        };
+      } catch (err) {
+        throw toConnectError(err);
+      }
+    },
+
+    async resetPassword(req) {
+      try {
+        const result = await authService.resetPassword(
+          ResetPasswordRequestDto.from({
+            token: req.token,
+            email: req.email,
+            newPassword: req.newPassword,
+            passwordEncoding: req.passwordEncoding,
+          }),
         );
         return {
           success: result.success,

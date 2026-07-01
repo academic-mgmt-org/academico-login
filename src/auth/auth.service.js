@@ -17,6 +17,7 @@ import {
   LogoutRequestDto,
   LogoutResponseDto,
   RefreshTokenRequestDto,
+  ResetPasswordRequestDto,
   ValidateTokenResponseDto,
 } from './dto/auth.dto';
 
@@ -24,10 +25,15 @@ const AUTH_ERROR_MESSAGE =
   'Usuario o contraseña incorrectos. Verifique sus credenciales.';
 const PASSWORD_RESET_GENERIC_MESSAGE =
   'Si el correo existe, enviaremos un enlace para recuperar la contraseña.';
+const PASSWORD_RESET_INVALID_MESSAGE =
+  'Token de recuperacion invalido o expirado';
+const PASSWORD_RESET_SUCCESS_MESSAGE = 'Contraseña actualizada correctamente';
 const DEFAULT_ACCESS_TOKEN_TTL = '2h';
 const DEFAULT_REFRESH_TOKEN_TTL = '7d';
 const DEFAULT_PASSWORD_RESET_TTL_MINUTES = 30;
 const DEFAULT_PASSWORD_RESET_THROTTLE_SECONDS = 60;
+const DEFAULT_PASSWORD_BCRYPT_ROUNDS = 12;
+const MIN_PASSWORD_LENGTH = 8;
 const OPTIONAL_SESSION_ERROR_CODES = new Set(['42P01', '42703', '3F000']);
 
 @Injectable()
@@ -193,6 +199,65 @@ export class AuthService {
     });
 
     return response;
+  }
+
+  async resetPassword(resetPasswordRequest) {
+    const request = ResetPasswordRequestDto.from(resetPasswordRequest);
+    const newPassword = this.normalizeNewPassword(
+      request.newPassword,
+      request.passwordEncoding,
+    );
+    const passwordHash = await this.hashPassword(newPassword);
+    const pool = getPool();
+
+    await this.ensurePasswordResetSchema(pool);
+
+    const client = await pool.connect();
+    let resetTokenRow;
+
+    try {
+      await client.query('BEGIN');
+
+      resetTokenRow = await this.consumePasswordResetToken(client, {
+        tokenHash: this.sha256(request.token),
+        email: request.email,
+      });
+
+      if (!resetTokenRow) {
+        throw new BadRequestException(PASSWORD_RESET_INVALID_MESSAGE);
+      }
+
+      const passwordUpdated = await this.updateUserPassword(client, {
+        userId: String(resetTokenRow.user_id),
+        email: resetTokenRow.email,
+        passwordHash,
+      });
+
+      if (!passwordUpdated) {
+        throw new BadRequestException(PASSWORD_RESET_INVALID_MESSAGE);
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        // Best effort rollback; preserve the original error for callers.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    await this.revokeSessionsForPayload(pool, {
+      userId: String(resetTokenRow.user_id),
+      email: resetTokenRow.email,
+    });
+
+    return GenericResponseDto.from({
+      success: true,
+      message: PASSWORD_RESET_SUCCESS_MESSAGE,
+    });
   }
 
   async logout(logoutRequest = {}, authorization) {
@@ -410,6 +475,38 @@ export class AuthService {
     );
   }
 
+  async consumePasswordResetToken(client, reset) {
+    const { rows } = await client.query(
+      `
+        UPDATE academico.password_reset_tokens
+        SET used_at = NOW()
+        WHERE token_hash = $1
+          AND used_at IS NULL
+          AND expires_at > NOW()
+          AND ($2::text IS NULL OR LOWER(email) = LOWER($2))
+        RETURNING id, user_id, email
+      `,
+      [reset.tokenHash, reset.email || null],
+    );
+
+    return rows[0] || null;
+  }
+
+  async updateUserPassword(client, change) {
+    const { rowCount } = await client.query(
+      `
+        UPDATE academico.usuarios
+        SET password_hash = $1
+        WHERE id::text = $2
+          AND LOWER(email) = LOWER($3)
+          AND LOWER(estado) = 'activo'
+      `,
+      [change.passwordHash, change.userId, change.email],
+    );
+
+    return rowCount > 0;
+  }
+
   normalizeLoginRequest(loginRequest) {
     if (!loginRequest || !loginRequest.username || !loginRequest.password) {
       throw new BadRequestException('Usuario y contraseña son requeridos');
@@ -442,6 +539,36 @@ export class AuthService {
     }
 
     return { username, passwordCandidates };
+  }
+
+  normalizeNewPassword(rawPassword, passwordEncoding) {
+    let password = String(rawPassword);
+    const requestedEncoding =
+      passwordEncoding === undefined || passwordEncoding === null
+        ? undefined
+        : String(passwordEncoding).trim().toLowerCase();
+
+    if (requestedEncoding === 'base64') {
+      try {
+        password = Buffer.from(password, 'base64').toString('utf8');
+      } catch (error) {
+        throw new BadRequestException('Codificacion de contraseña no soportada');
+      }
+    } else if (requestedEncoding && requestedEncoding !== 'plain') {
+      throw new BadRequestException('Codificacion de contraseña no soportada');
+    }
+
+    if (!password || !password.trim()) {
+      throw new BadRequestException('Nueva contraseña es requerida');
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      throw new BadRequestException(
+        `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres`,
+      );
+    }
+
+    return password;
   }
 
   isStrictBase64(value) {
@@ -493,6 +620,10 @@ export class AuthService {
     }
 
     return false;
+  }
+
+  async hashPassword(password) {
+    return bcrypt.hash(password, this.getPasswordBcryptRounds());
   }
 
   buildTokenPayload(userRow, sessionId) {
@@ -821,6 +952,17 @@ export class AuthService {
     return Number.isFinite(parsed) && parsed >= 0
       ? Math.min(parsed, 3600)
       : DEFAULT_PASSWORD_RESET_THROTTLE_SECONDS;
+  }
+
+  getPasswordBcryptRounds() {
+    const parsed = parseInt(
+      process.env.PASSWORD_BCRYPT_ROUNDS ||
+        String(DEFAULT_PASSWORD_BCRYPT_ROUNDS),
+      10,
+    );
+    return Number.isFinite(parsed) && parsed >= 4 && parsed <= 14
+      ? parsed
+      : DEFAULT_PASSWORD_BCRYPT_ROUNDS;
   }
 
   expiresAtFromTtl(ttl) {

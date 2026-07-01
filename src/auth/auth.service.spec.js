@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import getPool from '../db';
 import { AuthService } from './auth.service';
@@ -11,6 +11,7 @@ jest.mock('../db', () => ({
 describe('AuthService', () => {
   const originalEnv = { ...process.env };
   let mockPool;
+  let mockClient;
   let jwtService;
   let passwordResetNotifier;
   let service;
@@ -34,8 +35,14 @@ describe('AuthService', () => {
       JWT_REFRESH_TTL: '7d',
     };
 
+    mockClient = {
+      query: jest.fn(),
+      release: jest.fn(),
+    };
+
     mockPool = {
       query: jest.fn(),
+      connect: jest.fn().mockResolvedValue(mockClient),
     };
     getPool.mockReturnValue(mockPool);
 
@@ -226,5 +233,92 @@ describe('AuthService', () => {
     expect(
       passwordResetNotifier.sendPasswordResetEmail.mock.calls[0][0].resetUrl,
     ).toContain('https://academico.test/reset-password?token=');
+  });
+
+  it('restablece contraseña con token de recuperacion y revoca sesiones', async () => {
+    process.env.PASSWORD_BCRYPT_ROUNDS = '4';
+
+    mockPool.query
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rowCount: 2 });
+    mockClient.query
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'reset-1',
+            user_id: 'user-1',
+            email: 'estudiante@utn.edu.ec',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rowCount: 1 });
+
+    await expect(
+      service.resetPassword({
+        token: 'reset-token',
+        email: 'estudiante@utn.edu.ec',
+        newPassword: 'nuevaPassword123',
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      message: 'Contraseña actualizada correctamente',
+    });
+
+    expect(mockPool.query.mock.calls[0][0]).toContain(
+      'CREATE TABLE IF NOT EXISTS academico.password_reset_tokens',
+    );
+    expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+    expect(mockClient.query.mock.calls[1][0]).toContain(
+      'UPDATE academico.password_reset_tokens',
+    );
+    expect(mockClient.query.mock.calls[1][1][1]).toBe(
+      'estudiante@utn.edu.ec',
+    );
+    expect(mockClient.query.mock.calls[2][0]).toContain(
+      'UPDATE academico.usuarios',
+    );
+
+    const updatePasswordParams = mockClient.query.mock.calls[2][1];
+    expect(updatePasswordParams[1]).toBe('user-1');
+    expect(updatePasswordParams[2]).toBe('estudiante@utn.edu.ec');
+    await expect(
+      bcrypt.compare('nuevaPassword123', updatePasswordParams[0]),
+    ).resolves.toBe(true);
+
+    expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
+    expect(mockClient.release).toHaveBeenCalled();
+    expect(mockPool.query.mock.calls[1][0]).toContain(
+      'UPDATE academico.auth_sessions',
+    );
+    expect(mockPool.query.mock.calls[1][1]).toEqual([
+      'user-1',
+      'estudiante@utn.edu.ec',
+    ]);
+  });
+
+  it('rechaza reset de contraseña con token invalido y hace rollback', async () => {
+    process.env.PASSWORD_BCRYPT_ROUNDS = '4';
+
+    mockPool.query.mockResolvedValueOnce({ rowCount: 1 });
+    mockClient.query
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 });
+
+    await expect(
+      service.resetPassword({
+        token: 'reset-token-invalido',
+        newPassword: 'nuevaPassword123',
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+    expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
+    expect(mockClient.query.mock.calls.some(([query]) =>
+      String(query).includes('UPDATE academico.usuarios'),
+    )).toBe(false);
+    expect(mockClient.release).toHaveBeenCalled();
   });
 });

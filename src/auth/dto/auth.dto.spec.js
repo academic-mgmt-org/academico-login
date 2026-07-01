@@ -6,6 +6,7 @@ import {
   LogoutRequestDto,
   RefreshTokenRequestDto,
   RequestContextDto,
+  ResetPasswordRequestDto,
   ValidateTokenRequestDto,
 } from './auth.dto';
 
@@ -56,6 +57,34 @@ describe('Auth DTOs', () => {
       success: true,
       message: 'ok',
     });
+  });
+
+  it('normaliza ResetPasswordRequestDto con aliases camelCase y snake_case', () => {
+    expect(
+      ResetPasswordRequestDto.from({
+        reset_token: ' reset-token ',
+        email: ' ESTUDIANTE@UTN.EDU.EC ',
+        new_password: 'password123',
+        password_encoding: 'plain',
+      }),
+    ).toMatchObject({
+      token: 'reset-token',
+      email: 'estudiante@utn.edu.ec',
+      newPassword: 'password123',
+      passwordEncoding: 'plain',
+    });
+  });
+
+  it('rechaza ResetPasswordRequestDto incompleto o con correo invalido', () => {
+    expect(() => ResetPasswordRequestDto.from({ token: 'reset-token' }))
+      .toThrow(BadRequestException);
+    expect(() =>
+      ResetPasswordRequestDto.from({
+        token: 'reset-token',
+        email: 'correo-invalido',
+        newPassword: 'password123',
+      }),
+    ).toThrow(BadRequestException);
   });
 
   it('rechaza ForgotPasswordRequestDto invalido', () => {

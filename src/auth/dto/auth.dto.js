@@ -114,6 +114,62 @@ export class ForgotPasswordRequestDto {
   }
 }
 
+export class ResetPasswordRequestDto {
+  constructor({ token, email, newPassword, passwordEncoding }) {
+    this.token = token;
+    assignIfDefined(this, 'email', email);
+    this.newPassword = newPassword;
+    assignIfDefined(this, 'passwordEncoding', passwordEncoding);
+  }
+
+  static from(value = {}) {
+    if (value instanceof ResetPasswordRequestDto) {
+      return value;
+    }
+
+    if (!value || typeof value !== 'object') {
+      throw new BadRequestException('Token y nueva contraseña son requeridos');
+    }
+
+    const tokenValue = pickFirst(value, ['token', 'resetToken', 'reset_token']);
+    const newPasswordValue = pickFirst(value, [
+      'newPassword',
+      'new_password',
+      'password',
+    ]);
+
+    if (!tokenValue || !newPasswordValue) {
+      throw new BadRequestException('Token y nueva contraseña son requeridos');
+    }
+
+    const token = String(tokenValue).trim();
+    const newPassword = String(newPasswordValue);
+
+    if (!token || !newPassword) {
+      throw new BadRequestException('Token y nueva contraseña son requeridos');
+    }
+
+    const emailValue = pickFirst(value, ['email', 'username']);
+    let email;
+    if (emailValue !== undefined && emailValue !== null && emailValue !== '') {
+      email = String(emailValue).trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new BadRequestException('Correo electronico invalido');
+      }
+    }
+
+    return new ResetPasswordRequestDto({
+      token,
+      email,
+      newPassword,
+      passwordEncoding: pickFirst(value, [
+        'passwordEncoding',
+        'password_encoding',
+      ]),
+    });
+  }
+}
+
 export class LogoutRequestDto {
   constructor({ token, refreshToken }) {
     assignIfDefined(this, 'token', token);

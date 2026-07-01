@@ -26,6 +26,13 @@ message ForgotPasswordRequest {
   string email = 1;
 }
 
+message ResetPasswordRequest {
+  string token = 1;
+  string email = 2;
+  string new_password = 3;
+  string password_encoding = 4;
+}
+
 message ValidateTokenRequest {
   string token = 1;
 }
@@ -93,6 +100,7 @@ service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse) {}
   rpc RefreshToken(RefreshTokenRequest) returns (LoginResponse) {}
   rpc ForgotPassword(ForgotPasswordRequest) returns (GenericResponse) {}
+  rpc ResetPassword(ResetPasswordRequest) returns (GenericResponse) {}
   rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse) {}
   rpc ValidateTokenSimple(ValidateTokenRequest) returns (TokenValidityResponse) {}
   rpc ValidateTokenWithHeader(Empty) returns (ValidateTokenResponse) {}
