@@ -33,4 +33,4 @@ RUN npm ci --omit=dev && rm -rf /root/.npm
 
 EXPOSE 3001
 
-CMD ["node", "dist/main"]
+CMD ["node", "dist/main.js"]
