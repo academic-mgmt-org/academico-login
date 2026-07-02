@@ -3,13 +3,15 @@ FROM node:22.13.0-slim AS builder
 
 WORKDIR /usr/src/app
 
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 
-RUN npm install --legacy-peer-deps
+RUN npm ci
 
 COPY . .
 
@@ -20,12 +22,14 @@ FROM node:22.13.0-slim AS production
 
 WORKDIR /usr/src/app
 
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+
 COPY --from=builder /usr/src/app/dist ./dist
 COPY package*.json ./
 
 ENV NODE_ENV=production
 
-RUN npm install --only=production --legacy-peer-deps && npm cache clean --force
+RUN npm ci --omit=dev && rm -rf /root/.npm
 
 EXPOSE 3001
 
