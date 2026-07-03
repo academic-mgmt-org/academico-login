@@ -20,6 +20,153 @@ stages:
     pool:
       vmImage: ubuntu-latest
     steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '20.x'
+      displayName: Use Node.js
+
+    - script: npm ci
+      displayName: Install dependencies
+
+    - script: |
+        set -euo pipefail
+        mkdir -p quality-gates
+
+        npm run test:cov -- --coverageReporters=json --watchAll=false
+        npm audit --json --audit-level=critical --package-lock-only > quality-gates/npm-audit.json || true
+        npx eslint "{src,apps,libs,test}/**/*.ts" --format json --no-error-on-unmatched-pattern > quality-gates/eslint.json || true
+
+        node <<'NODE'
+        const fs = require('node:fs');
+
+        function readJson(path, fallback) {
+          try {
+            return JSON.parse(fs.readFileSync(path, 'utf8'));
+          } catch {
+            return fallback;
+          }
+        }
+
+        function number(value) {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : -1;
+        }
+
+        function percent(metric) {
+          return metric.total > 0
+            ? Math.round((metric.covered / metric.total) * 10000) / 100
+            : -1;
+        }
+
+        function coverageFromIstanbulFinal(path) {
+          const report = readJson(path, {});
+          const totals = {
+            lines: { total: 0, covered: 0 },
+            statements: { total: 0, covered: 0 },
+            branches: { total: 0, covered: 0 },
+            functions: { total: 0, covered: 0 },
+          };
+
+          for (const file of Object.values(report)) {
+            const lineHits = new Map();
+
+            for (const [statementId, location] of Object.entries(file?.statementMap || {})) {
+              const line = Number(location?.start?.line);
+              if (!Number.isFinite(line)) {
+                continue;
+              }
+
+              const hits = Number(file?.s?.[statementId] || 0);
+              lineHits.set(line, Math.max(lineHits.get(line) || 0, hits));
+            }
+
+            totals.lines.total += lineHits.size;
+            totals.lines.covered += [...lineHits.values()].filter((hits) => hits > 0).length;
+
+            const statementHits = Object.values(file?.s || {}).map(Number);
+            totals.statements.total += statementHits.length;
+            totals.statements.covered += statementHits.filter((hits) => hits > 0).length;
+
+            const functionHits = Object.values(file?.f || {}).map(Number);
+            totals.functions.total += functionHits.length;
+            totals.functions.covered += functionHits.filter((hits) => hits > 0).length;
+
+            for (const branchHits of Object.values(file?.b || {})) {
+              for (const hits of branchHits || []) {
+                totals.branches.total += 1;
+                totals.branches.covered += Number(hits) > 0 ? 1 : 0;
+              }
+            }
+          }
+
+          return {
+            lines: percent(totals.lines),
+            statements: percent(totals.statements),
+            branches: percent(totals.branches),
+            functions: percent(totals.functions),
+          };
+        }
+
+        const coverage = coverageFromIstanbulFinal('coverage/coverage-final.json');
+        const audit = readJson('quality-gates/npm-audit.json', {});
+        const eslintResults = readJson('quality-gates/eslint.json', []);
+
+        const criticalVulnerabilities = Number.isFinite(Number(audit?.metadata?.vulnerabilities?.critical))
+          ? Number(audit.metadata.vulnerabilities.critical)
+          : audit?.vulnerabilities && typeof audit.vulnerabilities === 'object'
+            ? Object.values(audit.vulnerabilities).filter((vulnerability) => vulnerability?.severity === 'critical').length
+            : -1;
+
+        const criticalBugs = Array.isArray(eslintResults)
+          ? eslintResults.reduce((total, result) => {
+              const fatalErrorCount = Number(result?.fatalErrorCount);
+              if (Number.isFinite(fatalErrorCount)) {
+                return total + fatalErrorCount;
+              }
+
+              const fatalMessages = Array.isArray(result?.messages)
+                ? result.messages.filter((message) => message?.fatal === true && message?.severity === 2)
+                : [];
+              return total + fatalMessages.length;
+            }, 0)
+          : -1;
+
+        const summary = {
+          coverage: {
+            lines: number(coverage.lines),
+            statements: number(coverage.statements),
+            branches: number(coverage.branches),
+            functions: number(coverage.functions),
+          },
+          vulnerabilities: {
+            critical: criticalVulnerabilities,
+          },
+          bugs: {
+            critical: criticalBugs,
+          },
+          metadata: {
+            service: process.env.BUILD_REPOSITORY_NAME || 'academico-login',
+            commit: process.env.BUILD_SOURCEVERSION || '',
+            buildId: process.env.BUILD_BUILDID || '',
+            generatedAt: new Date().toISOString(),
+          },
+        };
+
+        fs.writeFileSync('quality-gates/quality-gates-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
+        console.log(JSON.stringify(summary, null, 2));
+        NODE
+      displayName: Generate quality gates summary
+
+    - script: test -f quality-gates/quality-gates-summary.json
+      displayName: Verify quality gates summary
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: $(Build.SourcesDirectory)/quality-gates/quality-gates-summary.json
+        ArtifactName: quality-gates-summary
+        publishLocation: Container
+      displayName: Publish quality-gates-summary.json
+
     - task: Docker@2
       displayName: Build and push an image to container registry
       inputs:
