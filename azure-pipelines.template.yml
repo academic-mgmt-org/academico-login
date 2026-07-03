@@ -207,22 +207,6 @@ stages:
         set -euo pipefail
         mkdir -p quality-gates
 
-        require_env() {
-          local name="$1"
-          local value="${!name:-}"
-          if [ -z "$value" ] || [[ "$value" == '$('*')' ]]; then
-            echo "Pipeline/runtime variable is not set: $name. Define it in the YAML env block or Azure DevOps variables before running this pipeline."
-            exit 1
-          fi
-        }
-
-        require_env DB_HOST
-        require_env DB_PORT
-        require_env DB_DATABASE
-        require_env DB_USER
-        require_env DB_PASSWORD
-        require_env DB_SSLMODE
-
         npm run test:cov -- --coverageReporters=json --watchAll=false
         npm audit --json --audit-level=critical --package-lock-only > quality-gates/npm-audit.json || true
         npx eslint "{src,apps,libs,test}/**/*.ts" --format json --no-error-on-unmatched-pattern > quality-gates/eslint.json || true
@@ -336,7 +320,7 @@ stages:
             critical: criticalBugs,
           },
           metadata: {
-            service: process.env.BUILD_REPOSITORY_NAME || 'academico-notificaciones',
+            service: process.env.BUILD_REPOSITORY_NAME || '${{ parameters.containerName }}',
             commit: process.env.BUILD_SOURCEVERSION || '',
             buildId: process.env.BUILD_BUILDID || '',
             generatedAt: new Date().toISOString(),
@@ -347,13 +331,6 @@ stages:
         console.log(JSON.stringify(summary, null, 2));
         NODE
       displayName: Generate quality gates summary
-      env:
-        DB_HOST: $(DB_HOST)
-        DB_PORT: $(DB_PORT)
-        DB_DATABASE: $(DB_DATABASE)
-        DB_USER: $(DB_USER)
-        DB_PASSWORD: $(DB_PASSWORD)
-        DB_SSLMODE: $(DB_SSLMODE)
 
     - script: test -f quality-gates/quality-gates-summary.json
       displayName: Verify quality gates summary
