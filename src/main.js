@@ -6,6 +6,7 @@ import { config } from 'dotenv';
 import { fastifyConnectPlugin } from '@connectrpc/connect-fastify';
 import { ConnectError, Code } from '@connectrpc/connect';
 import connectRoutes from './connect-routes';
+import { warmDatabasePool } from './db';
 config();
 
 async function bootstrap() {
@@ -72,6 +73,11 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type,Authorization,x-api-key',
   });
+
+  const warmup = await warmDatabasePool();
+  logger.log(
+    `Pool PostgreSQL calentado: ${warmup.connections} conexion(es) en ${warmup.durationSeconds.toFixed(3)}s`,
+  );
 
   const port = process.env.PORT || 3001;
   await app.listen(port, '0.0.0.0');
