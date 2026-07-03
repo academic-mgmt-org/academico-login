@@ -156,6 +156,21 @@ stages:
         console.log(JSON.stringify(summary, null, 2));
         NODE
       displayName: Generate quality gates summary
+      env:
+        NODE_ENV: production
+        LOGIN_API_KEY: $(LOGIN_API_KEY)
+        JWT_SECRET: $(JWT_SECRET)
+        JWT_DOC_SECRET: $(JWT_DOC_SECRET)
+        JWT_ACCESS_TTL: $(JWT_ACCESS_TTL)
+        JWT_REFRESH_TTL: $(JWT_REFRESH_TTL)
+        BASE_URL: $(BASE_URL)
+        NOTIFICATIONS_GATEWAY_TARGET: $(NOTIFICATIONS_GATEWAY_TARGET)
+        DB_HOST: $(DB_HOST)
+        DB_PORT: $(DB_PORT)
+        DB_DATABASE: $(DB_DATABASE)
+        DB_USER: $(DB_USER)
+        DB_PASSWORD: $(DB_PASSWORD)
+        NOTIFICATIONS_GRPC_TIMEOUT_MS: $(NOTIFICATIONS_GRPC_TIMEOUT_MS)
 
     - script: test -f quality-gates/quality-gates-summary.json
       displayName: Verify quality gates summary

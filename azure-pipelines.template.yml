@@ -331,6 +331,9 @@ stages:
         console.log(JSON.stringify(summary, null, 2));
         NODE
       displayName: Generate quality gates summary
+      env:
+        ${{ each envVar in parameters.envVariables }}:
+          ${{ envVar.key }}: ${{ envVar.value }}
 
     - script: test -f quality-gates/quality-gates-summary.json
       displayName: Verify quality gates summary
