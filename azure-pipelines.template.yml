@@ -59,6 +59,14 @@ parameters:
   type: string
   default: 'self-hosted-agent'
 
+- name: developmentVariableGroup
+  type: string
+  default: 'academico-microservicio-dev'
+
+- name: productionVariableGroup
+  type: string
+  default: 'academico-microservicio-prod'
+
 - name: devRemoteAppPath
   type: string
   default: '/home/azureuser/academico-microservicio'
@@ -142,7 +150,7 @@ parameters:
 # development .env instead of being required as Azure DevOps variables.
 - name: preservedEnvVariableNames
   type: string
-  default: 'BASE_URL PASSWORD_RESET_TTL_MINUTES PASSWORD_RESET_THROTTLE_SECONDS'
+  default: 'PASSWORD_RESET_TTL_MINUTES PASSWORD_RESET_THROTTLE_SECONDS'
 
 # Values injected into the .env creation step. Use Azure DevOps secret variables
 # for sensitive values and plain literals for non-sensitive values.
@@ -350,6 +358,8 @@ stages:
   displayName: Deploy to development
   dependsOn: Build
   condition: succeeded()
+  variables:
+  - group: ${{ parameters.developmentVariableGroup }}
   jobs:
   - job: DeployDevelopment
     displayName: Deploy Docker Compose on development server
@@ -593,6 +603,8 @@ stages:
   displayName: Deploy to production
   dependsOn: ApproveProduction
   condition: succeeded()
+  variables:
+  - group: ${{ parameters.productionVariableGroup }}
   jobs:
   - job: DeployProduction
     displayName: Deploy ${{ parameters.containerName }} to production Kubernetes

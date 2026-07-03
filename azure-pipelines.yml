@@ -183,6 +183,8 @@ stages:
   displayName: Deploy to development
   dependsOn: Build
   condition: succeeded()
+  variables:
+  - group: academico-login-dev
   jobs:
   - job: DeployDevelopment
     displayName: Deploy Docker Compose on development server
@@ -405,14 +407,14 @@ stages:
         JWT_DOC_SECRET: $(JWT_DOC_SECRET)
         JWT_ACCESS_TTL: $(JWT_ACCESS_TTL)
         JWT_REFRESH_TTL: $(JWT_REFRESH_TTL)
-        BASE_URL: academia-dev.eastus2.cloudapp.azure.com:50050
-        NOTIFICATIONS_GATEWAY_TARGET: 20.122.210.230:50050
+        BASE_URL: $(BASE_URL)
+        NOTIFICATIONS_GATEWAY_TARGET: $(NOTIFICATIONS_GATEWAY_TARGET)
         DB_HOST: $(DB_HOST)
         DB_PORT: $(DB_PORT)
         DB_DATABASE: $(DB_DATABASE)
         DB_USER: $(DB_USER)
         DB_PASSWORD: $(DB_PASSWORD)
-        NOTIFICATIONS_GRPC_TIMEOUT_MS: '60000'
+        NOTIFICATIONS_GRPC_TIMEOUT_MS: $(NOTIFICATIONS_GRPC_TIMEOUT_MS)
 
 - stage: ApproveProduction
   displayName: Approve production deployment
@@ -438,6 +440,8 @@ stages:
   displayName: Deploy to production
   dependsOn: ApproveProduction
   condition: succeeded()
+  variables:
+  - group: academico-login-prod
   jobs:
   - job: DeployProduction
     displayName: Deploy academico-login to production Kubernetes
@@ -476,11 +480,11 @@ stages:
         JWT_DOC_SECRET: $(JWT_DOC_SECRET)
         JWT_ACCESS_TTL: $(JWT_ACCESS_TTL)
         JWT_REFRESH_TTL: $(JWT_REFRESH_TTL)
-        BASE_URL: academia-utn.eastus2.cloudapp.azure.com:50050
-        NOTIFICATIONS_GATEWAY_TARGET: 20.96.156.43:50050
+        BASE_URL: $(BASE_URL)
+        NOTIFICATIONS_GATEWAY_TARGET: $(NOTIFICATIONS_GATEWAY_TARGET)
         DB_HOST: $(DB_HOST)
         DB_PORT: $(DB_PORT)
         DB_DATABASE: $(DB_DATABASE)
         DB_USER: $(DB_USER)
         DB_PASSWORD: $(DB_PASSWORD)
-        NOTIFICATIONS_GRPC_TIMEOUT_MS: '60000'
+        NOTIFICATIONS_GRPC_TIMEOUT_MS: $(NOTIFICATIONS_GRPC_TIMEOUT_MS)
