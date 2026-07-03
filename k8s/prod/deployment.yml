@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: academico-login
+  namespace: academico-prod
+  labels:
+    app.kubernetes.io/name: academico-login
+    app.kubernetes.io/part-of: academico
+spec:
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 300
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: academico-login
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: academico-login
+        app.kubernetes.io/part-of: academico
+    spec:
+      imagePullSecrets:
+        - name: acr-pull-secret
+      terminationGracePeriodSeconds: 30
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: academico.utn.edu.ec/login-placement
+                    operator: In
+                    values:
+                      - primary
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: academico-login
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: academico-login
+          image: acracademicoutn.azurecr.io/academicmgmtorgacademicologin:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: grpc
+              containerPort: 3001
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: academico-login-env
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          startupProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 10
+            failureThreshold: 3

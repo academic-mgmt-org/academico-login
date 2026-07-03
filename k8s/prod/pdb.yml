@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: academico-login
+  namespace: academico-prod
+  labels:
+    app.kubernetes.io/name: academico-login
+    app.kubernetes.io/part-of: academico
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: academico-login

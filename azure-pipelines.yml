@@ -284,7 +284,7 @@ stages:
         notifyUsers: gacalderonr@utn.edu.ec
         approvers: gacalderonr@utn.edu.ec
         allowApproversToApproveTheirOwnRuns: true
-        instructions: Approve to deploy academico-login to production server 20.115.132.131.
+        instructions: Approve to deploy academico-login to the production Kubernetes cluster on 20.115.132.131.
         onTimeout: reject
 
 - stage: DeployProduction
@@ -293,7 +293,7 @@ stages:
   condition: succeeded()
   jobs:
   - job: DeployProduction
-    displayName: Deploy Docker Compose on production server
+    displayName: Deploy academico-login to production Kubernetes
     pool:
       vmImage: ubuntu-latest
     steps:
@@ -304,229 +304,25 @@ stages:
         containerRegistry: 5cffc302-0a35-4b2b-8ea1-04a9ebd67c07
 
     - script: |
-        set -euo pipefail
-
-        require_env() {
-          local name="$1"
-          if [ -z "${!name:-}" ]; then
-            echo "Missing required environment variable: $name"
-            exit 1
-          fi
-        }
-
-        validate_env_name() {
-          local name="$1"
-          if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-            echo "Invalid environment variable name: $name"
-            exit 1
-          fi
-        }
-
-        require_env PROD_SSH_PRIVATE_KEY_B64
-        validate_env_name "$IMAGE_ENV_VARIABLE_NAME"
-
-        for name in $ENV_VARIABLE_NAMES; do
-          validate_env_name "$name"
-          require_env "$name"
-        done
-
-        IMAGE="${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}"
-        SSH_DIR="$(mktemp -d)"
-        ENV_FILE_LOCAL="$(mktemp)"
-
-        cleanup() {
-          rm -rf "$SSH_DIR" "$ENV_FILE_LOCAL"
-        }
-        trap cleanup EXIT
-
-        if [ ! -f "$COMPOSE_SOURCE_FILE" ]; then
-          echo "Missing compose source file: $COMPOSE_SOURCE_FILE"
-          exit 1
-        fi
-
-        mkdir -p "$SSH_DIR"
-        chmod 700 "$SSH_DIR"
-        printf '%s' "$PROD_SSH_PRIVATE_KEY_B64" | base64 -d > "$SSH_DIR/key"
-        chmod 600 "$SSH_DIR/key"
-        ssh-keyscan -T 10 "$PROD_SSH_HOST" > "$SSH_DIR/known_hosts"
-
-        SSH_OPTS=(
-          -i "$SSH_DIR/key"
-          -o IdentitiesOnly=yes
-          -o UserKnownHostsFile="$SSH_DIR/known_hosts"
-          -o StrictHostKeyChecking=yes
-        )
-        REMOTE="${PROD_SSH_USER}@${PROD_SSH_HOST}"
-
-        DOCKER_CONFIG_FILE="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
-        if [ ! -f "$DOCKER_CONFIG_FILE" ]; then
-          echo "Missing Docker config after ACR login: $DOCKER_CONFIG_FILE"
-          exit 1
-        fi
-
-        echo "Copying ACR Docker login to production server..."
-        ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p ~/.docker && umask 077 && cat > ~/.docker/config.json" < "$DOCKER_CONFIG_FILE"
-
-        echo "Reading production service port..."
-        SERVICE_PORT="$(
-          ssh "${SSH_OPTS[@]}" "$REMOTE" \
-            "set -eu; ENV_FILE='$REMOTE_APP_PATH/.env'; DEFAULT_SERVICE_PORT='$DEFAULT_SERVICE_PORT'; SERVICE_PORT=''; if [ -f \"\$ENV_FILE\" ]; then SERVICE_PORT=\$(sed -n 's/^PORT=//p' \"\$ENV_FILE\" | tail -n 1); fi; if [ -z \"\$SERVICE_PORT\" ]; then if [ -z \"\$DEFAULT_SERVICE_PORT\" ]; then echo \"No PORT found in \$ENV_FILE and servicePort was not configured.\" >&2; exit 1; fi; echo \"No PORT found in \$ENV_FILE. Using configured servicePort \$DEFAULT_SERVICE_PORT.\" >&2; SERVICE_PORT=\"\$DEFAULT_SERVICE_PORT\"; fi; printf '%s\n' \"\$SERVICE_PORT\""
-        )"
-
-        if [[ ! "$SERVICE_PORT" =~ ^[0-9]+$ ]]; then
-          echo "Invalid PORT value resolved for production: $SERVICE_PORT"
-          exit 1
-        fi
-
-        umask 077
-        {
-          printf '%s=%s\n' "$IMAGE_ENV_VARIABLE_NAME" "$IMAGE"
-          printf 'PORT=%s\n' "$SERVICE_PORT"
-          for name in $ENV_VARIABLE_NAMES; do
-            printf '%s=%s\n' "$name" "${!name}"
-          done
-        } > "$ENV_FILE_LOCAL"
-
-        echo "Updating production .env and compose file..."
-        ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p '$REMOTE_APP_PATH' && umask 077 && cat > '$REMOTE_APP_PATH/.env.pipeline'" < "$ENV_FILE_LOCAL"
-        ssh "${SSH_OPTS[@]}" "$REMOTE" "REMOTE_APP_PATH='$REMOTE_APP_PATH' bash -se" << 'REMOTE_ENV_MERGE'
-        set -euo pipefail
-
-        ENV_FILE="$REMOTE_APP_PATH/.env"
-        GENERATED_FILE="$REMOTE_APP_PATH/.env.pipeline"
-        MERGED_FILE="$REMOTE_APP_PATH/.env.merged"
-
-        if [ -f "$ENV_FILE" ]; then
-          awk '
-            FNR == NR {
-              if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-                split($0, parts, "=")
-                managed[parts[1]] = 1
-              }
-              generated[++generated_count] = $0
-              next
-            }
-            {
-              if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-                split($0, parts, "=")
-                if (parts[1] in managed) {
-                  next
-                }
-              }
-              print
-            }
-            END {
-              for (i = 1; i <= generated_count; i++) {
-                print generated[i]
-              }
-            }
-          ' "$GENERATED_FILE" "$ENV_FILE" > "$MERGED_FILE"
-        else
-          cp "$GENERATED_FILE" "$MERGED_FILE"
-        fi
-
-        mv "$MERGED_FILE" "$ENV_FILE"
-        rm -f "$GENERATED_FILE"
-        chmod 600 "$ENV_FILE"
-        REMOTE_ENV_MERGE
-        ssh "${SSH_OPTS[@]}" "$REMOTE" "cat > '$REMOTE_APP_PATH/$PROD_COMPOSE_FILE'" < "$COMPOSE_SOURCE_FILE"
-
-        echo "Deploying with Docker Compose..."
-        ssh "${SSH_OPTS[@]}" "$REMOTE" \
-          "REMOTE_APP_PATH='$REMOTE_APP_PATH' PROD_COMPOSE_FILE='$PROD_COMPOSE_FILE' CONTAINER_NAME='$CONTAINER_NAME' bash -se" << 'REMOTE_SCRIPT'
-        set -euo pipefail
-
-        cd "$REMOTE_APP_PATH"
-
-        container_is_running() {
-          docker ps --filter "name=^/${CONTAINER_NAME}$" --filter "status=running" --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"
-        }
-
-        show_port_usage() {
-          local service_port=""
-          if [ -f .env ]; then
-            service_port="$(sed -n 's/^PORT=//p' .env | tail -n 1 || true)"
-          fi
-
-          if [ -n "$service_port" ]; then
-            echo "Containers publishing port $service_port:"
-            docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}' | awk -v port="$service_port" 'NR == 1 || index($0, ":" port "->") > 0'
-          fi
-        }
-
-        ensure_docker_network() {
-          local network_name="$1"
-          if docker network inspect "$network_name" >/dev/null 2>&1; then
-            return
-          fi
-
-          echo "Creating Docker network $network_name..."
-          docker network create "$network_name" >/dev/null
-        }
-
-        start_compose() {
-          local compose_file="$1"
-          if ! docker compose -f "$compose_file" up -d --remove-orphans; then
-            echo "Docker Compose reported a startup error. Waiting before checking container state..."
-            sleep 8
-            if container_is_running; then
-              echo "Container $CONTAINER_NAME is running after the startup error; continuing."
-              return 0
-            fi
-
-            show_port_usage
-            return 1
-          fi
-        }
-
-        if [ -f docker-compose.yml ]; then
-          echo "Stopping current compose project..."
-          docker compose -f docker-compose.yml down --remove-orphans || true
-        fi
-
-        echo "Stopping previous pipeline compose project..."
-        docker compose -f "$PROD_COMPOSE_FILE" down --remove-orphans || true
-
-        ensure_docker_network academico-backend
-
-        echo "Pulling production image..."
-        docker compose -f "$PROD_COMPOSE_FILE" pull
-
-        echo "Starting production compose project..."
-        start_compose "$PROD_COMPOSE_FILE"
-
-        echo "Verifying container is running..."
-        sleep 8
-        if ! container_is_running; then
-          echo "Container $CONTAINER_NAME did not stay running."
-          show_port_usage
-          docker ps -a --filter "name=^/${CONTAINER_NAME}$"
-          docker logs --tail 200 "$CONTAINER_NAME" || true
-          exit 1
-        fi
-
-        docker compose -f "$PROD_COMPOSE_FILE" ps
-
-        echo "Cleaning up dangling images..."
-        docker image prune -f
-
-        echo "Production deployment completed."
-        REMOTE_SCRIPT
-      displayName: Deploy to production with Docker Compose
+        bash "$(Build.SourcesDirectory)/scripts/deploy_k8s_production.sh"
+      displayName: Deploy to production Kubernetes
       env:
         CONTAINER_REGISTRY: acracademicoutn.azurecr.io
         IMAGE_REPOSITORY: academicmgmtorgacademicologin
         TAG: $(tag)
-        CONTAINER_NAME: academico-login
-        PROD_SSH_HOST: 20.115.132.131
-        PROD_SSH_USER: azureuser
-        REMOTE_APP_PATH: /home/azureuser/academico-login
-        PROD_COMPOSE_FILE: docker-compose.yml
-        COMPOSE_SOURCE_FILE: $(Build.SourcesDirectory)/docker-compose.yml
-        IMAGE_ENV_VARIABLE_NAME: ACADEMICO_LOGIN_IMAGE
+        K8S_SSH_HOST: 20.115.132.131
+        K8S_SSH_USER: azureuser
+        K8S_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
+        K8S_NAMESPACE: academico-prod
+        K8S_MANIFEST_DIR: $(Build.SourcesDirectory)/k8s/prod
+        K8S_REMOTE_MANIFEST_PATH: /tmp/academico-login-k8s-manifests
+        K8S_DEPLOYMENT: academico-login
+        K8S_CONTAINER: academico-login
+        IMAGE_PULL_SECRET_NAME: acr-pull-secret
+        APP_SECRET_NAME: academico-login-env
+        ROLLOUT_TIMEOUT: 5m
+        APP_PORT: '3001'
         ENV_VARIABLE_NAMES: NODE_ENV LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL BASE_URL NOTIFICATIONS_GATEWAY_TARGET DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD NOTIFICATIONS_GRPC_TIMEOUT_MS
-        DEFAULT_SERVICE_PORT: '3001'
-        PROD_SSH_PRIVATE_KEY_B64: $(PROD_SSH_PRIVATE_KEY_B64)
         NODE_ENV: production
         LOGIN_API_KEY: $(LOGIN_API_KEY)
         JWT_SECRET: $(JWT_SECRET)
