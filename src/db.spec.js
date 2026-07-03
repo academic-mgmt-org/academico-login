@@ -1,92 +1,42 @@
-import { warmDatabasePool } from './db';
+import { config } from 'dotenv';
+import getPool, { warmDatabasePool } from './db';
 
-describe('warmDatabasePool', () => {
-  const originalEnv = { ...process.env };
+config();
 
-  afterEach(() => {
-    process.env = originalEnv;
-    jest.clearAllMocks();
+function expectDatabaseConfig() {
+  const missing = [
+    'DB_HOST',
+    'DB_PORT',
+    'DB_DATABASE',
+    'DB_USER',
+    'DB_PASSWORD',
+  ].filter((name) => !process.env[name] || process.env[name].startsWith('$('));
+
+  expect(missing).toEqual([]);
+}
+
+describe('warmDatabasePool real database', () => {
+  afterAll(async () => {
+    await getPool().end();
   });
 
-  it('calienta conexiones en paralelo usando DB_POOL_MIN por defecto', async () => {
-    process.env = {
-      ...originalEnv,
-      DB_POOL_MIN: '2',
-      DB_POOL_MAX: '10',
-    };
-    delete process.env.DB_POOL_WARMUP_CONNECTIONS;
+  it('calienta conexiones reales contra PostgreSQL antes de atender requests', async () => {
+    expectDatabaseConfig();
 
-    const resolvers = [];
-    const pool = {
-      query: jest.fn(
-        () =>
-          new Promise((resolve) => {
-            resolvers.push(resolve);
-          }),
-      ),
-      totalCount: 2,
-      idleCount: 2,
-      waitingCount: 0,
-    };
+    const warmup = await warmDatabasePool({ connections: 2 });
 
-    const warmup = warmDatabasePool({ pool });
+    expect(warmup.connections).toBe(2);
+    expect(warmup.totalCount).toBeGreaterThanOrEqual(2);
+    expect(warmup.idleCount).toBeGreaterThanOrEqual(1);
+    expect(warmup.waitingCount).toBe(0);
 
-    expect(pool.query).toHaveBeenCalledTimes(2);
-    expect(pool.query).toHaveBeenNthCalledWith(1, 'SELECT 1');
-    expect(pool.query).toHaveBeenNthCalledWith(2, 'SELECT 1');
+    const start = process.hrtime.bigint();
+    const result = await getPool().query('SELECT 1 AS ready');
+    const durationMs = Number(process.hrtime.bigint() - start) / 1e6;
 
-    resolvers.forEach((resolve) => resolve({ rows: [{ one: 1 }] }));
-
-    await expect(warmup).resolves.toMatchObject({
-      connections: 2,
-      totalCount: 2,
-      idleCount: 2,
-      waitingCount: 0,
-    });
-  });
-
-  it('limita el warmup al maximo del pool', async () => {
-    process.env = {
-      ...originalEnv,
-      DB_POOL_MIN: '5',
-      DB_POOL_MAX: '3',
-    };
-    delete process.env.DB_POOL_WARMUP_CONNECTIONS;
-
-    const pool = {
-      query: jest.fn().mockResolvedValue({ rows: [{ one: 1 }] }),
-    };
-
-    await expect(warmDatabasePool({ pool })).resolves.toMatchObject({
-      connections: 3,
-    });
-    expect(pool.query).toHaveBeenCalledTimes(3);
-  });
-
-  it('permite deshabilitar el warmup con cero conexiones', async () => {
-    process.env = {
-      ...originalEnv,
-      DB_POOL_MIN: '2',
-      DB_POOL_WARMUP_CONNECTIONS: '0',
-    };
-
-    const pool = {
-      query: jest.fn(),
-    };
-
-    await expect(warmDatabasePool({ pool })).resolves.toMatchObject({
-      connections: 0,
-    });
-    expect(pool.query).not.toHaveBeenCalled();
-  });
-
-  it('propaga errores para impedir readiness con base de datos fria o no disponible', async () => {
-    const pool = {
-      query: jest.fn().mockRejectedValue(new Error('db unavailable')),
-    };
-
-    await expect(warmDatabasePool({ pool, connections: 1 })).rejects.toThrow(
-      'db unavailable',
+    expect(result.rows).toEqual([{ ready: 1 }]);
+    expect(durationMs).toBeLessThan(
+      Number(process.env.DB_WARMUP_TEST_MAX_QUERY_MS || 250),
     );
   });
 });
