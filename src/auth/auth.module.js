@@ -7,7 +7,10 @@ import { PasswordResetNotifierService } from './password-reset-notifier.service'
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || process.env.JWT_DOC_SECRET || 'utn-secret-key-123',
+      secret:
+        process.env.JWT_SECRET ||
+        process.env.JWT_DOC_SECRET ||
+        'utn-secret-key-123',
     }),
   ],
   providers: [PasswordResetNotifierService, AuthService],

@@ -12,11 +12,11 @@ async function bootstrap() {
   const app = await NestFactory.create(
     AppModule,
     new FastifyAdapter({
-      http2: true
+      http2: true,
     }),
     {
-      bufferLogs: true
-    }
+      bufferLogs: true,
+    },
   );
 
   app.useLogger(app.get(Logger));
@@ -25,16 +25,22 @@ async function bootstrap() {
   // Cargar reflection dynamic import para ConnectRPC
   let registerServerReflectionFromUint8Array = null;
   try {
-    const reflectModule = await Function('return import("@lambdalisue/connectrpc-grpcreflect/server")')();
-    registerServerReflectionFromUint8Array = reflectModule.registerServerReflectionFromUint8Array;
+    const reflectModule = await Function(
+      'return import("@lambdalisue/connectrpc-grpcreflect/server")',
+    )();
+    registerServerReflectionFromUint8Array =
+      reflectModule.registerServerReflectionFromUint8Array;
     logger.log('✅ ConnectRPC Reflection Service module loaded successfully');
   } catch (error) {
-    logger.warn(`⚠️ ConnectRPC Reflection Service module could not be loaded: ${error.message}`);
+    logger.warn(
+      `⚠️ ConnectRPC Reflection Service module could not be loaded: ${error.message}`,
+    );
   }
 
   const fastifyInstance = app.getHttpAdapter().getInstance();
   await fastifyInstance.register(fastifyConnectPlugin, {
-    routes: (router) => connectRoutes(router, app, registerServerReflectionFromUint8Array),
+    routes: (router) =>
+      connectRoutes(router, app, registerServerReflectionFromUint8Array),
     interceptors: [
       (next) => async (req) => {
         // Excluir servicios de reflection y health check del requerimiento de API Key
@@ -64,11 +70,13 @@ async function bootstrap() {
   app.enableCors({
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type,Authorization,x-api-key'
+    allowedHeaders: 'Content-Type,Authorization,x-api-key',
   });
 
   const port = process.env.PORT || 3001;
   await app.listen(port, '0.0.0.0');
-  logger.log(`🚀 Microservicio academico-login corriendo en puerto ${port} (HTTP/2 Fastify habilitado)`);
+  logger.log(
+    `🚀 Microservicio academico-login corriendo en puerto ${port} (HTTP/2 Fastify habilitado)`,
+  );
 }
 bootstrap();

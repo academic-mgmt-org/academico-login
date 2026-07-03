@@ -99,7 +99,9 @@ export class ForgotPasswordRequestDto {
     }
 
     const emailValue =
-      typeof value === 'string' ? value : pickFirst(value, ['email', 'username']);
+      typeof value === 'string'
+        ? value
+        : pickFirst(value, ['email', 'username']);
 
     if (!emailValue) {
       throw new BadRequestException('Correo electronico es requerido');

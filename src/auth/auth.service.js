@@ -116,7 +116,7 @@ export class AuthService {
       refreshPayload = await this.jwtService.verifyAsync(refreshToken, {
         secret: this.getJwtSecret(),
       });
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException('Refresh token invalido o expirado');
     }
 
@@ -257,7 +257,7 @@ export class AuthService {
     } catch (error) {
       try {
         await client.query('ROLLBACK');
-      } catch (rollbackError) {
+      } catch {
         // Best effort rollback; preserve the original error for callers.
       }
       throw error;
@@ -292,7 +292,7 @@ export class AuthService {
       payload = await this.jwtService.verifyAsync(token, {
         secret: this.getJwtSecret(),
       });
-    } catch (error) {
+    } catch {
       return LogoutResponseDto.from({
         success: false,
         revoked: false,
@@ -350,7 +350,7 @@ export class AuthService {
         role: payload.role,
         applications: payload.applications || [],
       });
-    } catch (error) {
+    } catch {
       return ValidateTokenResponseDto.from({ isValid: false });
     }
   }
@@ -547,7 +547,7 @@ export class AuthService {
           requestedEncoding === 'base64'
             ? [decodedPassword]
             : [decodedPassword, rawPassword];
-      } catch (error) {
+      } catch {
         throw new UnauthorizedException(AUTH_ERROR_MESSAGE);
       }
     } else if (requestedEncoding && requestedEncoding !== 'plain') {
@@ -567,8 +567,10 @@ export class AuthService {
     if (requestedEncoding === 'base64') {
       try {
         password = Buffer.from(password, 'base64').toString('utf8');
-      } catch (error) {
-        throw new BadRequestException('Codificacion de contraseña no soportada');
+      } catch {
+        throw new BadRequestException(
+          'Codificacion de contraseña no soportada',
+        );
       }
     } else if (requestedEncoding && requestedEncoding !== 'plain') {
       throw new BadRequestException('Codificacion de contraseña no soportada');
@@ -596,8 +598,10 @@ export class AuthService {
       return false;
     }
     try {
-      return Buffer.from(normalized, 'base64').toString('base64') === normalized;
-    } catch (error) {
+      return (
+        Buffer.from(normalized, 'base64').toString('base64') === normalized
+      );
+    } catch {
       return false;
     }
   }
@@ -612,13 +616,16 @@ export class AuthService {
     if (/^\$2[aby]\$/.test(stored)) {
       try {
         return await bcrypt.compare(password, stored);
-      } catch (error) {
+      } catch {
         return false;
       }
     }
 
     if (stored.startsWith('sha256:')) {
-      return this.safeEqual(this.sha256(password), stored.slice(7).toLowerCase());
+      return this.safeEqual(
+        this.sha256(password),
+        stored.slice(7).toLowerCase(),
+      );
     }
 
     if (/^[a-f0-9]{64}$/i.test(stored)) {
@@ -803,7 +810,7 @@ export class AuthService {
       }
 
       return false;
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -925,7 +932,7 @@ export class AuthService {
       url.searchParams.set('token', token);
       url.searchParams.set('email', email);
       return url.toString();
-    } catch (error) {
+    } catch {
       const resetUrl = `${baseUrl.replace(/\/+$/, '')}/reset-password`;
       const separator = resetUrl.includes('?') ? '&' : '?';
       return `${resetUrl}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
@@ -959,7 +966,11 @@ export class AuthService {
   }
 
   getJwtSecret() {
-    return process.env.JWT_SECRET || process.env.JWT_DOC_SECRET || 'utn-secret-key-123';
+    return (
+      process.env.JWT_SECRET ||
+      process.env.JWT_DOC_SECRET ||
+      'utn-secret-key-123'
+    );
   }
 
   getAccessTokenTtl() {
@@ -1005,7 +1016,8 @@ export class AuthService {
 
   expiresAtFromTtl(ttl) {
     const seconds =
-      this.durationToSeconds(ttl) || this.durationToSeconds(DEFAULT_REFRESH_TOKEN_TTL);
+      this.durationToSeconds(ttl) ||
+      this.durationToSeconds(DEFAULT_REFRESH_TOKEN_TTL);
     return new Date(Date.now() + seconds * 1000);
   }
 
@@ -1014,7 +1026,9 @@ export class AuthService {
       return value;
     }
 
-    const match = String(value).trim().match(/^(\d+)([smhd])?$/i);
+    const match = String(value)
+      .trim()
+      .match(/^(\d+)([smhd])?$/i);
     if (!match) {
       return null;
     }

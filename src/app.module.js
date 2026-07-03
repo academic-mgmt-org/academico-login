@@ -11,16 +11,16 @@ import { AuthModule } from './auth/auth.module';
     LoggerModule.forRoot(pinoLoggerConfig),
     ConfigModule.forRoot({
       envFilePath: '.env',
-      isGlobal: true
+      isGlobal: true,
     }),
-    AuthModule
+    AuthModule,
   ],
   providers: [
     Logger,
     {
       provide: APP_FILTER,
-      useClass: HttpExceptionFilter
-    }
-  ]
+      useClass: HttpExceptionFilter,
+    },
+  ],
 })
 export class AppModule {}

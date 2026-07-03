@@ -191,7 +191,8 @@ describe('AuthService', () => {
       service.forgotPassword({ email: 'desconocido@utn.edu.ec' }),
     ).resolves.toMatchObject({
       success: true,
-      message: 'Si hay una cuenta asociada a ese correo, enviaremos instrucciones en los próximos minutos. Revisa también spam o correo no deseado. Si no recibes nada, verifica que escribiste el correo correcto o contacta soporte académico.',
+      message:
+        'Si hay una cuenta asociada a ese correo, enviaremos instrucciones en los próximos minutos. Revisa también spam o correo no deseado. Si no recibes nada, verifica que escribiste el correo correcto o contacta soporte académico.',
     });
 
     expect(passwordResetNotifier.sendPasswordResetEmail).not.toHaveBeenCalled();
@@ -306,9 +307,7 @@ describe('AuthService', () => {
     expect(mockClient.query.mock.calls[1][0]).toContain(
       'UPDATE academico.password_reset_tokens',
     );
-    expect(mockClient.query.mock.calls[1][1][1]).toBe(
-      'estudiante@utn.edu.ec',
-    );
+    expect(mockClient.query.mock.calls[1][1][1]).toBe('estudiante@utn.edu.ec');
     expect(mockClient.query.mock.calls[2][0]).toContain(
       'UPDATE academico.usuarios',
     );
@@ -349,9 +348,11 @@ describe('AuthService', () => {
 
     expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
     expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
-    expect(mockClient.query.mock.calls.some(([query]) =>
-      String(query).includes('UPDATE academico.usuarios'),
-    )).toBe(false);
+    expect(
+      mockClient.query.mock.calls.some(([query]) =>
+        String(query).includes('UPDATE academico.usuarios'),
+      ),
+    ).toBe(false);
     expect(mockClient.release).toHaveBeenCalled();
   });
 
@@ -399,9 +400,9 @@ describe('AuthService', () => {
       tokenUse: 'access',
       sessionId: 'SESSION-1',
     });
-    await expect(service.refresh({ refreshToken: 'access-token' })).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      service.refresh({ refreshToken: 'access-token' }),
+    ).rejects.toThrow(UnauthorizedException);
 
     jwtService.verifyAsync.mockResolvedValueOnce({
       tokenUse: 'refresh',
@@ -512,9 +513,12 @@ describe('AuthService', () => {
         passwordEncoding: 'rot13',
       }),
     ).toThrow(BadRequestException);
-    expect(service.normalizeNewPassword(Buffer.from('abcd1234').toString('base64'), 'base64')).toBe(
-      'abcd1234',
-    );
+    expect(
+      service.normalizeNewPassword(
+        Buffer.from('abcd1234').toString('base64'),
+        'base64',
+      ),
+    ).toBe('abcd1234');
     expect(() => service.normalizeNewPassword('', 'plain')).toThrow(
       BadRequestException,
     );
@@ -527,13 +531,21 @@ describe('AuthService', () => {
 
     expect(service.isStrictBase64('not-base64')).toBe(false);
     expect(await service.verifyPassword('password123', '')).toBe(false);
-    expect(await service.verifyPassword('password123', 'sha256:' + service.sha256('password123'))).toBe(
+    expect(
+      await service.verifyPassword(
+        'password123',
+        'sha256:' + service.sha256('password123'),
+      ),
+    ).toBe(true);
+    expect(
+      await service.verifyPassword(
+        'password123',
+        service.sha256('password123'),
+      ),
+    ).toBe(true);
+    expect(await service.verifyPassword('password123', 'password123')).toBe(
       true,
     );
-    expect(await service.verifyPassword('password123', service.sha256('password123'))).toBe(
-      true,
-    );
-    expect(await service.verifyPassword('password123', 'password123')).toBe(true);
     expect(service.safeEqual('a', 'ab')).toBe(false);
   });
 
@@ -620,18 +632,25 @@ describe('AuthService', () => {
 
   it('actualiza, revoca y calcula sesiones con fallos tolerados', async () => {
     mockPool.query.mockRejectedValueOnce(new Error('db unavailable'));
-    await expect(service.touchSession(mockPool, 'SESSION-1')).resolves.toBeUndefined();
+    await expect(
+      service.touchSession(mockPool, 'SESSION-1'),
+    ).resolves.toBeUndefined();
 
     mockPool.query.mockRejectedValueOnce(
       Object.assign(new Error('missing column'), { code: '42703' }),
     );
-    await expect(service.revokeSession(mockPool, 'SESSION-1')).resolves.toBeUndefined();
+    await expect(
+      service.revokeSession(mockPool, 'SESSION-1'),
+    ).resolves.toBeUndefined();
 
     service.revokeSession = jest.fn().mockResolvedValue(undefined);
     await expect(
       service.revokeSessionsForPayload(mockPool, { sessionId: 'SESSION-ONLY' }),
     ).resolves.toBe(true);
-    expect(service.revokeSession).toHaveBeenCalledWith(mockPool, 'SESSION-ONLY');
+    expect(service.revokeSession).toHaveBeenCalledWith(
+      mockPool,
+      'SESSION-ONLY',
+    );
 
     await expect(service.revokeSessionsForPayload(mockPool, {})).resolves.toBe(
       false,
@@ -654,9 +673,9 @@ describe('AuthService', () => {
     expect(service.getPasswordResetBaseUrl()).toBe('https://academico.test');
 
     delete process.env.BASE_URL;
-    expect(() => service.buildPasswordResetUrl('token', 'user@utn.edu.ec')).toThrow(
-      InternalServerErrorException,
-    );
+    expect(() =>
+      service.buildPasswordResetUrl('token', 'user@utn.edu.ec'),
+    ).toThrow(InternalServerErrorException);
 
     process.env.JWT_SECRET = '';
     process.env.JWT_DOC_SECRET = 'doc-secret';

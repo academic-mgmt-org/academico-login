@@ -2,16 +2,16 @@ import { Catch, HttpException, HttpStatus, Inject } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
 /**
  * Filtro Global de Excepciones HTTP
- * 
+ *
  * Intercepta TODAS las excepciones lanzadas en el Gateway
  * y devuelve respuestas consistentes y profesionales.
- * 
+ *
  * Casos manejados:
  * - Errores HTTP estándar (401, 403, 404, etc.)
  * - Errores de conexión con microservicios (503)
  * - Errores inesperados (500)
  * - Timeouts de Axios/HTTP
- * 
+ *
  * @author UTN-MOVIL
  * @date 22 de noviembre de 2025
  */
@@ -36,7 +36,10 @@ export class HttpExceptionFilter {
       const exceptionResponse = exception.getResponse();
       if (typeof exceptionResponse === 'string') {
         errorMessage = exceptionResponse;
-      } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null
+      ) {
         errorMessage = exceptionResponse.message || errorMessage;
         errorCode = exceptionResponse.error || errorCode;
       }
@@ -55,13 +58,15 @@ export class HttpExceptionFilter {
       else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
         status = HttpStatus.SERVICE_UNAVAILABLE;
         errorCode = 'SERVICE_UNAVAILABLE';
-        errorMessage = 'El servicio solicitado no está disponible temporalmente';
+        errorMessage =
+          'El servicio solicitado no está disponible temporalmente';
       }
       // Error de validación de token (Seguridad caído)
       else if (error.message?.includes('validando acceso')) {
         status = HttpStatus.SERVICE_UNAVAILABLE;
         errorCode = 'AUTH_SERVICE_UNAVAILABLE';
-        errorMessage = 'Sistema de autenticación temporalmente no disponible. Intente nuevamente en unos momentos.';
+        errorMessage =
+          'Sistema de autenticación temporalmente no disponible. Intente nuevamente en unos momentos.';
       }
       // Otros errores inesperados
       else {
@@ -80,12 +85,12 @@ export class HttpExceptionFilter {
       ...(status === HttpStatus.SERVICE_UNAVAILABLE && {
         retryAfter: 60,
         // Segundos
-        documentation: 'https://docs.utn-movil.edu.ar/api/errors/503'
+        documentation: 'https://docs.utn-movil.edu.ar/api/errors/503',
       }),
       // Información adicional para 429 (Rate Limit)
       ...(status === HttpStatus.TOO_MANY_REQUESTS && {
-        retryAfter: exception.retryAfter || 60
-      })
+        retryAfter: exception.retryAfter || 60,
+      }),
     };
 
     // Logging diferenciado por severidad
@@ -97,16 +102,20 @@ export class HttpExceptionFilter {
       path: request.url,
       method: request.method,
       userAgent: request.headers['user-agent'],
-      ip: request.ip
+      ip: request.ip,
     };
 
     // Errores 5xx: Críticos (ERROR)
     if (status >= 500) {
-      this.logger.error({
-        ...logContext,
-        error: exception instanceof Error ? exception.message : String(exception),
-        stack: exception instanceof Error ? exception.stack : undefined
-      }, `❌ Error ${status}: ${errorMessage}`);
+      this.logger.error(
+        {
+          ...logContext,
+          error:
+            exception instanceof Error ? exception.message : String(exception),
+          stack: exception instanceof Error ? exception.stack : undefined,
+        },
+        `❌ Error ${status}: ${errorMessage}`,
+      );
     }
     // Errores 4xx: Advertencias (WARN)
     else if (status >= 400) {

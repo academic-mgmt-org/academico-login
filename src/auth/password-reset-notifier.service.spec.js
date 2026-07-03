@@ -232,9 +232,7 @@ describe('PasswordResetNotifierService', () => {
     expect(email.html).toContain('&lt;User &amp; Test&gt;');
     expect(email.html).toContain('&quot;abc&quot;');
     expect(email.metadata).toEqual(
-      expect.arrayContaining([
-        { key: 'expiresInMinutes', value: '15' },
-      ]),
+      expect.arrayContaining([{ key: 'expiresInMinutes', value: '15' }]),
     );
   });
 });

@@ -128,9 +128,8 @@ export class PasswordResetNotifierService {
           oneofs: true,
         },
       );
-      const notificacionesProto = grpc.loadPackageDefinition(
-        packageDefinition,
-      ).notificaciones.v1;
+      const notificacionesProto =
+        grpc.loadPackageDefinition(packageDefinition).notificaciones.v1;
 
       this.grpcEmailService = notificacionesProto.EmailService;
     }

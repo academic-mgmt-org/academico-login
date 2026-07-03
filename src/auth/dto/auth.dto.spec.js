@@ -32,8 +32,9 @@ describe('Auth DTOs', () => {
   });
 
   it('rechaza LoginRequestDto sin credenciales obligatorias', () => {
-    expect(() => LoginRequestDto.from({ username: 'estudiante@utn.edu.ec' }))
-      .toThrow(BadRequestException);
+    expect(() =>
+      LoginRequestDto.from({ username: 'estudiante@utn.edu.ec' }),
+    ).toThrow(BadRequestException);
     expect(() => LoginRequestDto.from(null)).toThrow(BadRequestException);
     expect(() =>
       LoginRequestDto.from({ username: '   ', password: 'password123' }),
@@ -94,8 +95,9 @@ describe('Auth DTOs', () => {
   });
 
   it('rechaza ResetPasswordRequestDto incompleto o con correo invalido', () => {
-    expect(() => ResetPasswordRequestDto.from({ token: 'reset-token' }))
-      .toThrow(BadRequestException);
+    expect(() =>
+      ResetPasswordRequestDto.from({ token: 'reset-token' }),
+    ).toThrow(BadRequestException);
     expect(() =>
       ResetPasswordRequestDto.from({
         token: 'reset-token',
@@ -107,13 +109,17 @@ describe('Auth DTOs', () => {
       BadRequestException,
     );
     expect(() =>
-      ResetPasswordRequestDto.from({ token: '   ', newPassword: 'password123' }),
+      ResetPasswordRequestDto.from({
+        token: '   ',
+        newPassword: 'password123',
+      }),
     ).toThrow(BadRequestException);
   });
 
   it('rechaza ForgotPasswordRequestDto invalido', () => {
-    expect(() => ForgotPasswordRequestDto.from({ email: 'correo-invalido' }))
-      .toThrow(BadRequestException);
+    expect(() =>
+      ForgotPasswordRequestDto.from({ email: 'correo-invalido' }),
+    ).toThrow(BadRequestException);
     expect(ForgotPasswordRequestDto.from('DOCENTE@UTN.EDU.EC')).toEqual({
       email: 'docente@utn.edu.ec',
     });
@@ -122,9 +128,11 @@ describe('Auth DTOs', () => {
   });
 
   it('mapea LogoutRequestDto sin exigir token para permitir fallback por header', () => {
-    expect(LogoutRequestDto.from({ refresh_token: 'refresh-1' })).toMatchObject({
-      refreshToken: 'refresh-1',
-    });
+    expect(LogoutRequestDto.from({ refresh_token: 'refresh-1' })).toMatchObject(
+      {
+        refreshToken: 'refresh-1',
+      },
+    );
     expect(LogoutRequestDto.from({})).toBeInstanceOf(LogoutRequestDto);
     expect(LogoutRequestDto.from('access-token')).toMatchObject({
       token: 'access-token',
