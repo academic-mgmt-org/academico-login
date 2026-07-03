@@ -3,7 +3,7 @@ import {
   InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
-import * as bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcrypt';
 import getPool from '../db';
 import { AuthService } from './auth.service';
 
@@ -120,6 +120,29 @@ describe('AuthService', () => {
     });
 
     expect(result.accessToken).toMatch(/^access-SESSION-/);
+  });
+
+  it('no bloquea el login si falla la persistencia asincrona de sesion', async () => {
+    service.logger.error = jest.fn();
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [userRow] })
+      .mockRejectedValueOnce(new Error('session db timeout'));
+
+    await expect(
+      service.login({
+        username: 'estudiante@utn.edu.ec',
+        password: 'password123',
+      }),
+    ).resolves.toMatchObject({
+      accessToken: expect.stringMatching(/^access-SESSION-/),
+      refreshToken: expect.stringMatching(/^refresh-SESSION-/),
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(service.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('session db timeout'),
+    );
   });
 
   it('rechaza credenciales incorrectas', async () => {

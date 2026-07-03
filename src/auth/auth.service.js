@@ -7,7 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import getPool from '../db';
 import { PasswordResetNotifierService } from './password-reset-notifier.service';
@@ -85,7 +85,7 @@ export class AuthService {
       { secret, expiresIn: refreshTokenTtl },
     );
 
-    await this.registerSession(pool, {
+    this.dispatchSessionPersistence(pool, {
       sessionId,
       userId: payload.sub,
       username: credentials.username,
@@ -106,6 +106,18 @@ export class AuthService {
       mfaRequired: false,
       requiresAppUpdate: false,
     });
+  }
+
+  dispatchSessionPersistence(pool, session) {
+    const persistencePromise = this.registerSession(pool, session);
+
+    if (persistencePromise && typeof persistencePromise.catch === 'function') {
+      persistencePromise.catch((error) => {
+        this.logger.error(
+          `Error persistiendo sesion de login: ${error.message || error}`,
+        );
+      });
+    }
   }
 
   async refresh(refreshTokenRequest) {
