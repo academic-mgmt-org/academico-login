@@ -98,7 +98,17 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.spec.(t|j)s",
+      "!app.module.js",
+      "!main.js",
+      "!connect-routes.js",
+      "!db.js",
+      "!auth/auth.module.js",
+      "!config/**",
+      "!filters/**",
+      "!gen/**",
+      "!middleware/**"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
