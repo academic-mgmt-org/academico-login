@@ -16,7 +16,7 @@ export default function getPool() {
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
       max: numberFromEnv('DB_POOL_MAX', 10),
-      min: numberFromEnv('DB_POOL_MIN', 1),
+      min: numberFromEnv('DB_POOL_MIN', 2),
       idleTimeoutMillis: numberFromEnv('DB_POOL_IDLE_TIMEOUT_MS', 60000),
       connectionTimeoutMillis: numberFromEnv(
         'DB_POOL_CONNECTION_TIMEOUT_MS',
