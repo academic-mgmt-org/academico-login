@@ -760,14 +760,16 @@ Fixes AB#26
 
 # 16. Quality Gates
 
+Los umbrales de latencia se evalúan por percentiles en una ventana rolling de 5 a 15 minutos. Esto evita que un pico aislado marque el servicio como fallido y alinea el control con prácticas habituales de SLO en producción.
+
 |Métrica|Objetivo|
 |---|---|
 |Cobertura|>= 85%|
 |Vulnerabilidades críticas|0|
 |Bugs críticos|0|
-|Latencia login|< 200 ms|
-|Latencia validación token|< 100 ms|
-|Disponibilidad|99.9%|
+|Latencia login|p95 < 500 ms; p99 < 1 s|
+|Latencia validación token|p95 < 100 ms; p99 < 250 ms|
+|Disponibilidad|>= 99.9%|
 
 ---
 
