@@ -138,7 +138,18 @@ export class PasswordResetNotifierService {
   }
 
   getGatewayTarget() {
-    return process.env.NOTIFICATIONS_GATEWAY_TARGET || process.env.BASE_URL;
+    return (
+      this.configuredValue(process.env.NOTIFICATIONS_GATEWAY_TARGET) ||
+      this.configuredValue(process.env.BASE_URL)
+    );
+  }
+
+  configuredValue(value) {
+    const normalized = String(value || '').trim();
+    if (!normalized || /^\$\([^)]+\)$/.test(normalized)) {
+      return null;
+    }
+    return normalized;
   }
 
   getGrpcChannelOptions() {

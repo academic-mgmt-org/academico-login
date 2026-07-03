@@ -72,6 +72,20 @@ describe('PasswordResetNotifierService', () => {
     expect(createClient).not.toHaveBeenCalled();
   });
 
+  it('ignora placeholders no resueltos de Azure y usa BASE_URL', () => {
+    process.env = {
+      ...originalEnv,
+      BASE_URL: 'academia-dev.eastus2.cloudapp.azure.com:50050',
+      NOTIFICATIONS_GATEWAY_TARGET: '$(NOTIFICATIONS_GATEWAY_TARGET)',
+    };
+
+    const service = new PasswordResetNotifierService();
+
+    expect(service.getGatewayTarget()).toBe(
+      'academia-dev.eastus2.cloudapp.azure.com:50050',
+    );
+  });
+
   it('permite usar un target IPv4 del gateway sin cambiar BASE_URL', async () => {
     process.env = {
       ...originalEnv,
