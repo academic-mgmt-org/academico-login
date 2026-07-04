@@ -7,6 +7,12 @@ import { AuthService as AuthDomainService } from './auth/auth.service.js';
 import { ConnectError, Code } from '@connectrpc/connect';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import getPool from './db.js';
+import { createDatabaseReadinessCheck } from './health/database-readiness.js';
+import {
+  createLegacyHealthHandlers,
+  registerGrpcHealthService,
+} from './health/grpc-health.js';
 import {
   LoginRequestDto,
   LogoutRequestDto,
@@ -23,6 +29,12 @@ const WHITELIST_ROUTES = [
   '/login/api/v1/auth/forgot-password',
   '/login/api/v1/auth/reset-password',
 ];
+
+const SERVICE_NAME = 'academico-login';
+const checkReadiness = createDatabaseReadinessCheck({
+  poolFactory: getPool,
+  dependencyName: 'PostgreSQL',
+});
 
 function toConnectError(err) {
   let code = Code.Internal;
@@ -222,30 +234,15 @@ export default (router, app, registerServerReflectionFromUint8Array) => {
     },
   });
 
+  registerGrpcHealthService(router, {
+    serviceName: SERVICE_NAME,
+    readinessCheck: checkReadiness,
+  });
   router.service(HealthRpcService, {
-    health() {
-      return {
-        status: 'healthy',
-        service: 'academico-login',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-      };
-    },
-
-    ready() {
-      return {
-        ready: true,
-        timestamp: new Date().toISOString(),
-      };
-    },
-
-    live() {
-      return {
-        alive: true,
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-      };
-    },
+    ...createLegacyHealthHandlers({
+      serviceName: SERVICE_NAME,
+      readinessCheck: checkReadiness,
+    }),
   });
 
   // Registrar Reflection API utilizando el descriptor binario compilado

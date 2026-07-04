@@ -129,6 +129,38 @@ parameters:
   type: string
   default: '5m'
 
+- name: postRolloutSmokeEnabled
+  type: string
+  default: 'false'
+
+- name: postRolloutSmokeBaseUrl
+  type: string
+  default: ''
+
+- name: postRolloutSmokeUsername
+  type: string
+  default: ''
+
+- name: postRolloutSmokePassword
+  type: string
+  default: ''
+
+- name: postRolloutSmokePasswordEncoding
+  type: string
+  default: 'plain'
+
+- name: postRolloutSmokeRetries
+  type: string
+  default: '12'
+
+- name: postRolloutSmokeSleepSeconds
+  type: string
+  default: '5'
+
+- name: postRolloutSmokeTimeoutSeconds
+  type: string
+  default: '5'
+
 # Name of the .env key used by docker compose for the pushed image.
 # The compose file must reference this variable in its image property.
 - name: imageEnvVariableName
@@ -639,6 +671,14 @@ stages:
         APP_SECRET_NAME: ${{ parameters.appSecretName }}
         ROLLOUT_TIMEOUT: ${{ parameters.rolloutTimeout }}
         APP_PORT: '${{ parameters.appPort }}'
+        POST_ROLLOUT_SMOKE_ENABLED: '${{ parameters.postRolloutSmokeEnabled }}'
+        POST_ROLLOUT_SMOKE_BASE_URL: '${{ parameters.postRolloutSmokeBaseUrl }}'
+        POST_ROLLOUT_SMOKE_USERNAME: '${{ parameters.postRolloutSmokeUsername }}'
+        POST_ROLLOUT_SMOKE_PASSWORD: '${{ parameters.postRolloutSmokePassword }}'
+        POST_ROLLOUT_SMOKE_PASSWORD_ENCODING: '${{ parameters.postRolloutSmokePasswordEncoding }}'
+        POST_ROLLOUT_SMOKE_RETRIES: '${{ parameters.postRolloutSmokeRetries }}'
+        POST_ROLLOUT_SMOKE_SLEEP_SECONDS: '${{ parameters.postRolloutSmokeSleepSeconds }}'
+        POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS: '${{ parameters.postRolloutSmokeTimeoutSeconds }}'
         ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
         ${{ each envVar in parameters.envVariables }}:
           ${{ envVar.key }}: ${{ envVar.value }}

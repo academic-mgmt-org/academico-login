@@ -9,6 +9,7 @@ metadata:
 spec:
   revisionHistoryLimit: 3
   progressDeadlineSeconds: 300
+  minReadySeconds: 15
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -62,18 +63,31 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 10
           startupProbe:
-            tcpSocket:
-              port: grpc
+            grpc:
+              port: 3001
+              service: academico-login-readiness
             periodSeconds: 5
             failureThreshold: 12
+            timeoutSeconds: 2
           readinessProbe:
-            tcpSocket:
-              port: grpc
+            grpc:
+              port: 3001
+              service: academico-login-readiness
             periodSeconds: 5
             failureThreshold: 3
+            timeoutSeconds: 2
           livenessProbe:
-            tcpSocket:
-              port: grpc
+            grpc:
+              port: 3001
+              service: academico-login-liveness
             periodSeconds: 10
             failureThreshold: 3
+            timeoutSeconds: 2
