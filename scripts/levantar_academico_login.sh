@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${ENV_FILE:-${PROJECT_DIR}/.env}"
-IMAGE="${IMAGE:-guical96/academico-login:latest}"
+IMAGE="${IMAGE:-acracademicoutn.azurecr.io/academicmgmtorgacademicologin:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-academico-login}"
 
 log() {
