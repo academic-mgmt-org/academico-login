@@ -28,15 +28,6 @@ spec:
         - name: acr-pull-secret
       terminationGracePeriodSeconds: 30
       affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: academico.utn.edu.ec/login-placement
-                    operator: In
-                    values:
-                      - primary
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 50

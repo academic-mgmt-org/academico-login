@@ -3,11 +3,8 @@ set -euo pipefail
 
 require_env() {
   local name="$1"
-  local value="${!name:-}"
-  local unresolved_azure_macro_pattern='^\$\([^)]+\)$'
-
-  if [ -z "$value" ] || [[ "$value" =~ $unresolved_azure_macro_pattern ]]; then
-    echo "Missing or unresolved required environment variable: $name"
+  if [ -z "${!name:-}" ]; then
+    echo "Missing required environment variable: $name"
     exit 1
   fi
 }
@@ -146,6 +143,7 @@ done
 } > "$SMOKE_FILE_LOCAL"
 
 printf '%s\n' "${POST_ROLLOUT_SMOKE_COMMAND:-}" > "$SMOKE_COMMAND_LOCAL"
+LEGACY_DOCKER_CLEANUP_ENABLED="${LEGACY_DOCKER_CLEANUP_ENABLED:-false}"
 
 mkdir -p "$SSH_DIR"
 chmod 700 "$SSH_DIR"
@@ -185,44 +183,15 @@ ssh "${SSH_OPTS[@]}" "$REMOTE" \
    APP_SECRET_NAME='$APP_SECRET_NAME' \
    ROLLOUT_TIMEOUT='$ROLLOUT_TIMEOUT' \
    IMAGE='$IMAGE' \
+   LEGACY_DOCKER_CLEANUP_ENABLED='$LEGACY_DOCKER_CLEANUP_ENABLED' \
    REMOTE_TMP_DIR='$REMOTE_TMP_DIR' \
    bash -se" << 'REMOTE_SCRIPT'
 set -euo pipefail
 
-CORDONED_BURST_NODES=""
-
-uncordon_burst_nodes() {
-  local node
-  for node in $CORDONED_BURST_NODES; do
-    kubectl uncordon "$node" >/dev/null 2>&1 || true
-  done
-}
-
 cleanup() {
-  uncordon_burst_nodes
   rm -rf "$REMOTE_TMP_DIR"
 }
 trap cleanup EXIT
-
-cordon_burst_nodes_for_single_replica_rollout() {
-  local current_replicas="0"
-  local node
-
-  current_replicas="$(
-    kubectl -n "$K8S_NAMESPACE" get deployment "$K8S_DEPLOYMENT" \
-      -o jsonpath='{.status.replicas}' 2>/dev/null || true
-  )"
-  current_replicas="${current_replicas:-0}"
-
-  if [ "$current_replicas" -gt 1 ]; then
-    return
-  fi
-
-  for node in $(kubectl get nodes -l academico.utn.edu.ec/login-placement=burst -o name 2>/dev/null || true); do
-    kubectl cordon "$node"
-    CORDONED_BURST_NODES="$CORDONED_BURST_NODES $node"
-  done
-}
 
 read_env_value() {
   local file="$1"
@@ -265,6 +234,75 @@ export_env_file() {
   done < "$file"
 }
 
+resolve_post_rollout_smoke_base_url() {
+  local app_port=""
+  local base_url=""
+  local service_ip=""
+
+  app_port="$(read_env_value "$REMOTE_TMP_DIR/app.env" PORT)"
+  base_url="${POST_ROLLOUT_SMOKE_BASE_URL:-}"
+
+  case "$base_url" in
+    "http://127.0.0.1:$app_port"|"http://localhost:$app_port")
+      service_ip="$(kubectl -n "$K8S_NAMESPACE" get service "$K8S_DEPLOYMENT" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+      if [ -n "$service_ip" ] && [ "$service_ip" != "None" ]; then
+        export POST_ROLLOUT_SMOKE_BASE_URL="http://$service_ip:$app_port"
+        echo "Resolved post-rollout smoke base URL to Kubernetes service $K8S_DEPLOYMENT at $POST_ROLLOUT_SMOKE_BASE_URL."
+      fi
+      ;;
+  esac
+}
+
+cleanup_legacy_docker_containers() {
+  local enabled="${LEGACY_DOCKER_CLEANUP_ENABLED:-false}"
+  local image_repo=""
+  local container_id=""
+  local container_image=""
+  local container_name=""
+  local container_ports=""
+  local docker_cmd=()
+  local ids=()
+
+  if ! is_enabled "$enabled"; then
+    echo "Legacy Docker container cleanup disabled."
+    return
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker is not installed; skipping legacy container cleanup."
+    return
+  fi
+
+  if docker info >/dev/null 2>&1; then
+    docker_cmd=(docker)
+  elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+    docker_cmd=(sudo -n docker)
+  else
+    echo "Docker is not accessible; skipping legacy container cleanup."
+    return
+  fi
+
+  image_repo="${IMAGE%:*}"
+  while IFS='|' read -r container_id container_image container_name container_ports; do
+    if [ -z "$container_id" ]; then
+      continue
+    fi
+
+    if [ "$container_name" = "$K8S_DEPLOYMENT" ] || [[ "$container_image" == "$image_repo:"* ]]; then
+      ids+=("$container_id")
+      echo "Marked legacy Docker container for removal: $container_name ($container_image, ports: ${container_ports:-none})."
+    fi
+  done < <("${docker_cmd[@]}" ps -a --format '{{.ID}}|{{.Image}}|{{.Names}}|{{.Ports}}')
+
+  if [ "${#ids[@]}" -eq 0 ]; then
+    echo "No legacy Docker containers matched $K8S_DEPLOYMENT or $image_repo:*."
+    return
+  fi
+
+  "${docker_cmd[@]}" rm -f "${ids[@]}"
+  echo "Removed ${#ids[@]} legacy Docker container(s)."
+}
+
 run_post_rollout_smoke_test() {
   local enabled=""
   local retries=""
@@ -289,6 +327,7 @@ run_post_rollout_smoke_test() {
   sleep_seconds="${sleep_seconds:-5}"
   export_env_file "$REMOTE_TMP_DIR/app.env"
   export_env_file "$REMOTE_TMP_DIR/smoke.env"
+  resolve_post_rollout_smoke_base_url
 
   echo "Running post-rollout smoke test..."
   for attempt in $(seq 1 "$retries"); do
@@ -318,7 +357,6 @@ kubectl -n "$K8S_NAMESPACE" create secret generic "$IMAGE_PULL_SECRET_NAME" \
   --dry-run=client \
   -o yaml | kubectl apply -f -
 
-cordon_burst_nodes_for_single_replica_rollout
 if [ -f "$K8S_REMOTE_MANIFEST_PATH/deployment.yml" ]; then
   kubectl set image --local \
     -f "$K8S_REMOTE_MANIFEST_PATH/deployment.yml" \
@@ -326,11 +364,12 @@ if [ -f "$K8S_REMOTE_MANIFEST_PATH/deployment.yml" ]; then
     -o yaml > "$REMOTE_TMP_DIR/deployment.yml"
   mv "$REMOTE_TMP_DIR/deployment.yml" "$K8S_REMOTE_MANIFEST_PATH/deployment.yml"
 fi
+
 kubectl apply -f "$K8S_REMOTE_MANIFEST_PATH"
 kubectl -n "$K8S_NAMESPACE" set image "deployment/$K8S_DEPLOYMENT" "$K8S_CONTAINER=$IMAGE"
 kubectl -n "$K8S_NAMESPACE" rollout status "deployment/$K8S_DEPLOYMENT" --timeout="$ROLLOUT_TIMEOUT"
-uncordon_burst_nodes
 kubectl -n "$K8S_NAMESPACE" get deployment,service,hpa,pdb -l app.kubernetes.io/name="$K8S_DEPLOYMENT" -o wide
+cleanup_legacy_docker_containers
 run_post_rollout_smoke_test
 REMOTE_SCRIPT
 

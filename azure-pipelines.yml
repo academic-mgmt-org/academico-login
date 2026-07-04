@@ -487,9 +487,10 @@ stages:
         IMAGE_PULL_SECRET_NAME: acr-pull-secret
         APP_SECRET_NAME: academico-login-env
         ROLLOUT_TIMEOUT: 5m
+        LEGACY_DOCKER_CLEANUP_ENABLED: 'true'
         APP_PORT: '3001'
         POST_ROLLOUT_SMOKE_ENABLED: 'true'
-        POST_ROLLOUT_SMOKE_BASE_URL: http://127.0.0.1:3001
+        POST_ROLLOUT_SMOKE_BASE_URL: 'http://127.0.0.1:3001'
         POST_ROLLOUT_SMOKE_COMMAND: |
           set -euo pipefail
 
@@ -503,15 +504,14 @@ stages:
             local headers=(-H "Content-Type: application/json")
 
             if [ "$include_api_key" = "true" ]; then
-              headers+=(-H "x-api-key: $LOGIN_API_KEY")
+              if [ -z "${NOTIFICACIONES_API_KEY:-}" ]; then
+                echo "NOTIFICACIONES_API_KEY is required for notification smoke checks."
+                exit 1
+              fi
+              headers+=(-H "x-api-key: $NOTIFICACIONES_API_KEY")
             fi
 
-            curl --http2-prior-knowledge -fsS \
-              --connect-timeout "$timeout_seconds" \
-              --max-time "$timeout_seconds" \
-              "${headers[@]}" \
-              --data "$payload" \
-              "$base_url/$method"
+            curl --http2-prior-knowledge -fsS --connect-timeout "$timeout_seconds" --max-time "$timeout_seconds" "${headers[@]}" --data "$payload" "$base_url/$method"
           }
 
           connect_call_status() {
@@ -522,45 +522,35 @@ stages:
             local headers=(-H "Content-Type: application/json")
 
             if [ "$include_api_key" = "true" ]; then
-              headers+=(-H "x-api-key: $LOGIN_API_KEY")
+              if [ -z "${NOTIFICACIONES_API_KEY:-}" ]; then
+                echo "NOTIFICACIONES_API_KEY is required for notification smoke checks."
+                exit 1
+              fi
+              headers+=(-H "x-api-key: $NOTIFICACIONES_API_KEY")
             fi
 
-            curl --http2-prior-knowledge -sS \
-              --connect-timeout "$timeout_seconds" \
-              --max-time "$timeout_seconds" \
-              "${headers[@]}" \
-              --data "$payload" \
-              --output "$response_file" \
-              --write-out "%{http_code}" \
-              "$base_url/$method"
+            curl --http2-prior-knowledge -sS --connect-timeout "$timeout_seconds" --max-time "$timeout_seconds" "${headers[@]}" --data "$payload" --output "$response_file" --write-out "%{http_code}" "$base_url/$method"
           }
 
-          health_response="$(connect_call "auth.v1.HealthService/Health" '{}' false)"
-          if [ "$(jq -r '.status // ""' <<< "$health_response")" != "healthy" ]; then
-            echo "Health smoke check did not return healthy."
+          health_response="$(connect_call "grpc.health.v1.Health/Check" '{"service":"academico-notificaciones-readiness"}' false)"
+          health_status="$(jq -r '.status // ""' <<< "$health_response")"
+          if [ "$health_status" != "SERVING" ] && [ "$health_status" != "1" ]; then
+            echo "gRPC readiness health check did not return SERVING."
+            echo "Health status: $health_status"
             exit 1
           fi
 
-          login_response_file="$(mktemp)"
-          trap 'rm -f "$login_response_file"' EXIT
-          login_payload="$(
-            jq -nc \
-              --arg username "post-rollout-smoke.invalid@example.invalid" \
-              --arg password "post-rollout-smoke-invalid-password" \
-              --arg passwordEncoding "plain" \
-              '{username: $username, password: $password, passwordEncoding: $passwordEncoding}'
-          )"
-          login_status="$(connect_call_status "auth.v1.AuthService/Login" "$login_payload" true "$login_response_file")"
-          login_error_code="$(jq -r '.code // ""' "$login_response_file")"
-          login_error_message="$(jq -r '.message // ""' "$login_response_file")"
-          expected_login_error_message="Usuario o contraseña incorrectos. Verifique sus credenciales."
+          domain_response_file="$(mktemp)"
+          trap 'rm -f "$domain_response_file"' EXIT
 
-          if [ "$login_status" != "401" ] \
-            || [ "$login_error_code" != "unauthenticated" ] \
-            || [ "$login_error_message" != "$expected_login_error_message" ]; then
-            echo "Login smoke check did not return the expected invalid-credentials response."
-            echo "HTTP status: $login_status"
-            echo "Connect error code: $login_error_code"
+          domain_status="$(connect_call_status "notificaciones.v1.EmailService/SendEmail" '{}' true "$domain_response_file")"
+          domain_error_code="$(jq -r '.code // ""' "$domain_response_file")"
+
+          if [ "$domain_status" != "400" ] || [ "$domain_error_code" != "invalid_argument" ]; then
+            echo "EmailService smoke check did not return the expected invalid request response."
+            echo "HTTP status: $domain_status"
+            echo "Connect error code: $domain_error_code"
+            cat "$domain_response_file"
             exit 1
           fi
         POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES: ''

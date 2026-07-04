@@ -129,9 +129,13 @@ parameters:
   type: string
   default: '5m'
 
+- name: legacyDockerCleanupEnabled
+  type: string
+  default: 'true'
+
 - name: postRolloutSmokeEnabled
   type: string
-  default: 'false'
+  default: 'true'
 
 - name: postRolloutSmokeBaseUrl
   type: string
@@ -139,7 +143,68 @@ parameters:
 
 - name: postRolloutSmokeCommand
   type: string
-  default: ''
+  default: |
+    set -euo pipefail
+
+    base_url="${POST_ROLLOUT_SMOKE_BASE_URL%/}"
+    timeout_seconds="${POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS:-5}"
+
+    connect_call() {
+      local method="$1"
+      local payload="$2"
+      local include_api_key="$3"
+      local headers=(-H "Content-Type: application/json")
+
+      if [ "$include_api_key" = "true" ]; then
+        if [ -z "${NOTIFICACIONES_API_KEY:-}" ]; then
+          echo "NOTIFICACIONES_API_KEY is required for notification smoke checks."
+          exit 1
+        fi
+        headers+=(-H "x-api-key: $NOTIFICACIONES_API_KEY")
+      fi
+
+      curl --http2-prior-knowledge -fsS --connect-timeout "$timeout_seconds" --max-time "$timeout_seconds" "${headers[@]}" --data "$payload" "$base_url/$method"
+    }
+
+    connect_call_status() {
+      local method="$1"
+      local payload="$2"
+      local include_api_key="$3"
+      local response_file="$4"
+      local headers=(-H "Content-Type: application/json")
+
+      if [ "$include_api_key" = "true" ]; then
+        if [ -z "${NOTIFICACIONES_API_KEY:-}" ]; then
+          echo "NOTIFICACIONES_API_KEY is required for notification smoke checks."
+          exit 1
+        fi
+        headers+=(-H "x-api-key: $NOTIFICACIONES_API_KEY")
+      fi
+
+      curl --http2-prior-knowledge -sS --connect-timeout "$timeout_seconds" --max-time "$timeout_seconds" "${headers[@]}" --data "$payload" --output "$response_file" --write-out "%{http_code}" "$base_url/$method"
+    }
+
+    health_response="$(connect_call "grpc.health.v1.Health/Check" '{"service":"academico-notificaciones-readiness"}' false)"
+    health_status="$(jq -r '.status // ""' <<< "$health_response")"
+    if [ "$health_status" != "SERVING" ] && [ "$health_status" != "1" ]; then
+      echo "gRPC readiness health check did not return SERVING."
+      echo "Health status: $health_status"
+      exit 1
+    fi
+
+    domain_response_file="$(mktemp)"
+    trap 'rm -f "$domain_response_file"' EXIT
+
+    domain_status="$(connect_call_status "notificaciones.v1.EmailService/SendEmail" '{}' true "$domain_response_file")"
+    domain_error_code="$(jq -r '.code // ""' "$domain_response_file")"
+
+    if [ "$domain_status" != "400" ] || [ "$domain_error_code" != "invalid_argument" ]; then
+      echo "EmailService smoke check did not return the expected invalid request response."
+      echo "HTTP status: $domain_status"
+      echo "Connect error code: $domain_error_code"
+      cat "$domain_response_file"
+      exit 1
+    fi
 
 - name: postRolloutSmokeEnvVariableNames
   type: string
@@ -666,6 +731,7 @@ stages:
         IMAGE_PULL_SECRET_NAME: ${{ parameters.imagePullSecretName }}
         APP_SECRET_NAME: ${{ parameters.appSecretName }}
         ROLLOUT_TIMEOUT: ${{ parameters.rolloutTimeout }}
+        LEGACY_DOCKER_CLEANUP_ENABLED: '${{ parameters.legacyDockerCleanupEnabled }}'
         APP_PORT: '${{ parameters.appPort }}'
         POST_ROLLOUT_SMOKE_ENABLED: '${{ parameters.postRolloutSmokeEnabled }}'
         POST_ROLLOUT_SMOKE_BASE_URL: '${{ parameters.postRolloutSmokeBaseUrl }}'
