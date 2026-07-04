@@ -571,7 +571,7 @@ stages:
       env:
         CONTAINER_REGISTRY: ${{ parameters.containerRegistry }}
         IMAGE_REPOSITORY: ${{ parameters.imageRepository }}
-        TAG: $(tag)
+        TAG: latest
         CONTAINER_NAME: ${{ parameters.containerName }}
         REMOTE_APP_PATH: ${{ parameters.devRemoteAppPath }}
         DEV_COMPOSE_FILE: ${{ parameters.devComposeFile }}

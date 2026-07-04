@@ -408,7 +408,7 @@ stages:
       env:
         CONTAINER_REGISTRY: acracademicoutn.azurecr.io
         IMAGE_REPOSITORY: academicmgmtorgacademicologin
-        TAG: $(tag)
+        TAG: latest
         CONTAINER_NAME: academico-login
         REMOTE_APP_PATH: /home/azureuser/academico-login
         DEV_COMPOSE_FILE: docker-compose.yml
