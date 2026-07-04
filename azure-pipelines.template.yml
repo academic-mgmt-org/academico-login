@@ -148,61 +148,33 @@ parameters:
 
     base_url="${POST_ROLLOUT_SMOKE_BASE_URL%/}"
     timeout_seconds="${POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS:-5}"
+    readiness_service="${POST_ROLLOUT_SMOKE_HEALTH_SERVICE_NAME:-${K8S_DEPLOYMENT:-}-readiness}"
 
     connect_call() {
       local method="$1"
       local payload="$2"
-      local include_api_key="$3"
       local headers=(-H "Content-Type: application/json")
 
-      if [ "$include_api_key" = "true" ]; then
-        if [ -z "${NOTIFICACIONES_API_KEY:-}" ]; then
-          echo "NOTIFICACIONES_API_KEY is required for notification smoke checks."
-          exit 1
-        fi
-        headers+=(-H "x-api-key: $NOTIFICACIONES_API_KEY")
+      if [ -z "$base_url" ]; then
+        echo "POST_ROLLOUT_SMOKE_BASE_URL is required."
+        exit 1
       fi
 
       curl --http2-prior-knowledge -fsS --connect-timeout "$timeout_seconds" --max-time "$timeout_seconds" "${headers[@]}" --data "$payload" "$base_url/$method"
     }
 
-    connect_call_status() {
-      local method="$1"
-      local payload="$2"
-      local include_api_key="$3"
-      local response_file="$4"
-      local headers=(-H "Content-Type: application/json")
-
-      if [ "$include_api_key" = "true" ]; then
-        if [ -z "${NOTIFICACIONES_API_KEY:-}" ]; then
-          echo "NOTIFICACIONES_API_KEY is required for notification smoke checks."
-          exit 1
-        fi
-        headers+=(-H "x-api-key: $NOTIFICACIONES_API_KEY")
-      fi
-
-      curl --http2-prior-knowledge -sS --connect-timeout "$timeout_seconds" --max-time "$timeout_seconds" "${headers[@]}" --data "$payload" --output "$response_file" --write-out "%{http_code}" "$base_url/$method"
-    }
-
-    health_response="$(connect_call "grpc.health.v1.Health/Check" '{"service":"academico-notificaciones-readiness"}' false)"
-    health_status="$(jq -r '.status // ""' <<< "$health_response")"
-    if [ "$health_status" != "SERVING" ] && [ "$health_status" != "1" ]; then
-      echo "gRPC readiness health check did not return SERVING."
-      echo "Health status: $health_status"
+    if [ "$readiness_service" = "-readiness" ]; then
+      echo "K8S_DEPLOYMENT is required to derive the post-rollout readiness service name."
       exit 1
     fi
 
-    domain_response_file="$(mktemp)"
-    trap 'rm -f "$domain_response_file"' EXIT
-
-    domain_status="$(connect_call_status "notificaciones.v1.EmailService/SendEmail" '{}' true "$domain_response_file")"
-    domain_error_code="$(jq -r '.code // ""' "$domain_response_file")"
-
-    if [ "$domain_status" != "400" ] || [ "$domain_error_code" != "invalid_argument" ]; then
-      echo "EmailService smoke check did not return the expected invalid request response."
-      echo "HTTP status: $domain_status"
-      echo "Connect error code: $domain_error_code"
-      cat "$domain_response_file"
+    health_payload="$(jq -cn --arg service "$readiness_service" '{service: $service}')"
+    health_response="$(connect_call "grpc.health.v1.Health/Check" "$health_payload")"
+    health_status="$(jq -r '.status // ""' <<< "$health_response")"
+    if [ "$health_status" != "SERVING" ] && [ "$health_status" != "1" ]; then
+      echo "gRPC readiness health check did not return SERVING."
+      echo "Requested service: $readiness_service"
+      echo "Health status: $health_status"
       exit 1
     fi
 
