@@ -137,17 +137,13 @@ parameters:
   type: string
   default: ''
 
-- name: postRolloutSmokeUsername
+- name: postRolloutSmokeCommand
   type: string
   default: ''
 
-- name: postRolloutSmokePassword
+- name: postRolloutSmokeEnvVariableNames
   type: string
   default: ''
-
-- name: postRolloutSmokePasswordEncoding
-  type: string
-  default: 'plain'
 
 - name: postRolloutSmokeRetries
   type: string
@@ -673,9 +669,8 @@ stages:
         APP_PORT: '${{ parameters.appPort }}'
         POST_ROLLOUT_SMOKE_ENABLED: '${{ parameters.postRolloutSmokeEnabled }}'
         POST_ROLLOUT_SMOKE_BASE_URL: '${{ parameters.postRolloutSmokeBaseUrl }}'
-        POST_ROLLOUT_SMOKE_USERNAME: '${{ parameters.postRolloutSmokeUsername }}'
-        POST_ROLLOUT_SMOKE_PASSWORD: '${{ parameters.postRolloutSmokePassword }}'
-        POST_ROLLOUT_SMOKE_PASSWORD_ENCODING: '${{ parameters.postRolloutSmokePasswordEncoding }}'
+        POST_ROLLOUT_SMOKE_COMMAND: ${{ parameters.postRolloutSmokeCommand }}
+        POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES: '${{ parameters.postRolloutSmokeEnvVariableNames }}'
         POST_ROLLOUT_SMOKE_RETRIES: '${{ parameters.postRolloutSmokeRetries }}'
         POST_ROLLOUT_SMOKE_SLEEP_SECONDS: '${{ parameters.postRolloutSmokeSleepSeconds }}'
         POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS: '${{ parameters.postRolloutSmokeTimeoutSeconds }}'

@@ -104,9 +104,10 @@ fi
 SSH_DIR="$(mktemp -d)"
 ENV_FILE_LOCAL="$(mktemp)"
 SMOKE_FILE_LOCAL="$(mktemp)"
+SMOKE_COMMAND_LOCAL="$(mktemp)"
 
 cleanup() {
-  rm -rf "$SSH_DIR" "$ENV_FILE_LOCAL" "$SMOKE_FILE_LOCAL"
+  rm -rf "$SSH_DIR" "$ENV_FILE_LOCAL" "$SMOKE_FILE_LOCAL" "$SMOKE_COMMAND_LOCAL"
 }
 trap cleanup EXIT
 
@@ -123,16 +124,25 @@ umask 077
   done
 } > "$ENV_FILE_LOCAL"
 
+POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES="${POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES:-}"
+for name in $POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES; do
+  validate_env_name "$name"
+  require_env "$name"
+done
+
 {
-  write_env_line POST_ROLLOUT_SMOKE_ENABLED "${POST_ROLLOUT_SMOKE_ENABLED:-true}"
+  write_env_line POST_ROLLOUT_SMOKE_ENABLED "${POST_ROLLOUT_SMOKE_ENABLED:-false}"
   write_env_line POST_ROLLOUT_SMOKE_BASE_URL "${POST_ROLLOUT_SMOKE_BASE_URL:-http://127.0.0.1:$APP_PORT}"
-  write_env_line POST_ROLLOUT_SMOKE_USERNAME "${POST_ROLLOUT_SMOKE_USERNAME:-}"
-  write_env_line POST_ROLLOUT_SMOKE_PASSWORD "${POST_ROLLOUT_SMOKE_PASSWORD:-}"
-  write_env_line POST_ROLLOUT_SMOKE_PASSWORD_ENCODING "${POST_ROLLOUT_SMOKE_PASSWORD_ENCODING:-plain}"
   write_env_line POST_ROLLOUT_SMOKE_RETRIES "${POST_ROLLOUT_SMOKE_RETRIES:-12}"
   write_env_line POST_ROLLOUT_SMOKE_SLEEP_SECONDS "${POST_ROLLOUT_SMOKE_SLEEP_SECONDS:-5}"
   write_env_line POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS "${POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS:-5}"
+  write_env_line POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES "$POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES"
+  for name in $POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES; do
+    write_env_line "$name" "${!name}"
+  done
 } > "$SMOKE_FILE_LOCAL"
+
+printf '%s\n' "${POST_ROLLOUT_SMOKE_COMMAND:-}" > "$SMOKE_COMMAND_LOCAL"
 
 mkdir -p "$SSH_DIR"
 chmod 700 "$SSH_DIR"
@@ -159,6 +169,7 @@ scp "${SSH_OPTS[@]}" "$K8S_MANIFEST_DIR"/*.yml "$REMOTE:$K8S_REMOTE_MANIFEST_PAT
 echo "Copying deployment secrets to $K8S_SSH_HOST..."
 scp "${SSH_OPTS[@]}" "$ENV_FILE_LOCAL" "$REMOTE:$REMOTE_TMP_DIR/app.env"
 scp "${SSH_OPTS[@]}" "$SMOKE_FILE_LOCAL" "$REMOTE:$REMOTE_TMP_DIR/smoke.env"
+scp "${SSH_OPTS[@]}" "$SMOKE_COMMAND_LOCAL" "$REMOTE:$REMOTE_TMP_DIR/smoke.sh"
 scp "${SSH_OPTS[@]}" "$DOCKER_CONFIG_FILE" "$REMOTE:$REMOTE_TMP_DIR/dockerconfigjson"
 
 echo "Applying production Kubernetes deployment..."
@@ -234,99 +245,27 @@ is_enabled() {
   esac
 }
 
-require_smoke_value() {
-  local name="$1"
-  local value="$2"
+export_env_file() {
+  local file="$1"
+  local line=""
+  local name=""
+  local value=""
 
-  if [ -z "$value" ]; then
-    echo "Missing required post-rollout smoke test value: $name"
-    exit 1
-  fi
-}
-
-run_post_rollout_smoke_test_once() {
-  local base_url="$1"
-  local api_key="$2"
-  local username="$3"
-  local password="$4"
-  local password_encoding="$5"
-  local timeout_seconds="$6"
-  local health_response=""
-  local login_payload=""
-  local login_response=""
-  local access_token=""
-  local validation_payload=""
-  local validation_response=""
-  local is_valid=""
-
-  connect_call() {
-    local method="$1"
-    local payload="$2"
-    local include_api_key="$3"
-    local headers=(-H "Content-Type: application/json")
-
-    if [ "$include_api_key" = "true" ]; then
-      headers+=(-H "x-api-key: $api_key")
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      continue
     fi
 
-    curl --http2-prior-knowledge -fsS \
-      --connect-timeout "$timeout_seconds" \
-      --max-time "$timeout_seconds" \
-      "${headers[@]}" \
-      --data "$payload" \
-      "$base_url/$method"
-  }
-
-  if ! health_response="$(connect_call "auth.v1.HealthService/Health" '{}' false)"; then
-    return 1
-  fi
-
-  if [ "$(jq -r '.status // ""' <<< "$health_response")" != "healthy" ]; then
-    echo "Health smoke check did not return healthy: $health_response"
-    return 1
-  fi
-
-  login_payload="$(
-    jq -nc \
-      --arg username "$username" \
-      --arg password "$password" \
-      --arg passwordEncoding "$password_encoding" \
-      '{username: $username, password: $password, passwordEncoding: $passwordEncoding}'
-  )"
-  if ! login_response="$(connect_call "auth.v1.AuthService/Login" "$login_payload" true)"; then
-    return 1
-  fi
-
-  access_token="$(jq -r '.accessToken // .access_token // ""' <<< "$login_response")"
-
-  if [ -z "$access_token" ]; then
-    echo "Login smoke check did not return an access token: $login_response"
-    return 1
-  fi
-
-  validation_payload="$(jq -nc --arg token "$access_token" '{token: $token}')"
-  if ! validation_response="$(connect_call "auth.v1.AuthService/ValidateToken" "$validation_payload" true)"; then
-    return 1
-  fi
-
-  is_valid="$(jq -r '.isValid // .is_valid // false' <<< "$validation_response")"
-
-  if [ "$is_valid" != "true" ]; then
-    echo "ValidateToken smoke check did not return isValid=true: $validation_response"
-    return 1
-  fi
+    name="${line%%=*}"
+    value="${line#*=}"
+    export "$name=$value"
+  done < "$file"
 }
 
 run_post_rollout_smoke_test() {
   local enabled=""
-  local base_url=""
-  local api_key=""
-  local username=""
-  local password=""
-  local password_encoding=""
   local retries=""
   local sleep_seconds=""
-  local timeout_seconds=""
   local attempt=""
 
   enabled="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_ENABLED)"
@@ -335,45 +274,23 @@ run_post_rollout_smoke_test() {
     return
   fi
 
-  command -v curl >/dev/null 2>&1 || {
-    echo "curl is required for post-rollout smoke tests."
+  if [ ! -s "$REMOTE_TMP_DIR/smoke.sh" ]; then
+    echo "POST_ROLLOUT_SMOKE_COMMAND is required when post-rollout smoke test is enabled."
     exit 1
-  }
-  command -v jq >/dev/null 2>&1 || {
-    echo "jq is required for post-rollout smoke tests."
-    exit 1
-  }
+  fi
 
-  base_url="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_BASE_URL)"
-  base_url="${base_url%/}"
-  api_key="$(read_env_value "$REMOTE_TMP_DIR/app.env" LOGIN_API_KEY)"
-  username="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_USERNAME)"
-  password="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_PASSWORD)"
-  password_encoding="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_PASSWORD_ENCODING)"
   retries="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_RETRIES)"
   sleep_seconds="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_SLEEP_SECONDS)"
-  timeout_seconds="$(read_env_value "$REMOTE_TMP_DIR/smoke.env" POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS)"
 
-  require_smoke_value POST_ROLLOUT_SMOKE_BASE_URL "$base_url"
-  require_smoke_value LOGIN_API_KEY "$api_key"
-  require_smoke_value POST_ROLLOUT_SMOKE_USERNAME "$username"
-  require_smoke_value POST_ROLLOUT_SMOKE_PASSWORD "$password"
-
-  password_encoding="${password_encoding:-plain}"
   retries="${retries:-12}"
   sleep_seconds="${sleep_seconds:-5}"
-  timeout_seconds="${timeout_seconds:-5}"
+  export_env_file "$REMOTE_TMP_DIR/app.env"
+  export_env_file "$REMOTE_TMP_DIR/smoke.env"
 
-  echo "Running post-rollout gRPC smoke test against $base_url..."
+  echo "Running post-rollout smoke test..."
   for attempt in $(seq 1 "$retries"); do
-    if run_post_rollout_smoke_test_once \
-      "$base_url" \
-      "$api_key" \
-      "$username" \
-      "$password" \
-      "$password_encoding" \
-      "$timeout_seconds"; then
-      echo "Post-rollout gRPC smoke test passed."
+    if bash "$REMOTE_TMP_DIR/smoke.sh"; then
+      echo "Post-rollout smoke test passed."
       return
     fi
 
@@ -381,7 +298,7 @@ run_post_rollout_smoke_test() {
     sleep "$sleep_seconds"
   done
 
-  echo "Post-rollout gRPC smoke test failed after $retries attempts."
+  echo "Post-rollout smoke test failed after $retries attempts."
   exit 1
 }
 

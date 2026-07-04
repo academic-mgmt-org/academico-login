@@ -490,12 +490,63 @@ stages:
         APP_PORT: '3001'
         POST_ROLLOUT_SMOKE_ENABLED: 'true'
         POST_ROLLOUT_SMOKE_BASE_URL: http://127.0.0.1:3001
-        POST_ROLLOUT_SMOKE_USERNAME: $(POST_ROLLOUT_SMOKE_USERNAME)
-        POST_ROLLOUT_SMOKE_PASSWORD: $(POST_ROLLOUT_SMOKE_PASSWORD)
-        POST_ROLLOUT_SMOKE_PASSWORD_ENCODING: plain
+        POST_ROLLOUT_SMOKE_COMMAND: |
+          set -euo pipefail
+
+          base_url="${POST_ROLLOUT_SMOKE_BASE_URL%/}"
+          timeout_seconds="${POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS:-5}"
+
+          connect_call() {
+            local method="$1"
+            local payload="$2"
+            local include_api_key="$3"
+            local headers=(-H "Content-Type: application/json")
+
+            if [ "$include_api_key" = "true" ]; then
+              headers+=(-H "x-api-key: $LOGIN_API_KEY")
+            fi
+
+            curl --http2-prior-knowledge -fsS \
+              --connect-timeout "$timeout_seconds" \
+              --max-time "$timeout_seconds" \
+              "${headers[@]}" \
+              --data "$payload" \
+              "$base_url/$method"
+          }
+
+          health_response="$(connect_call "auth.v1.HealthService/Health" '{}' false)"
+          if [ "$(jq -r '.status // ""' <<< "$health_response")" != "healthy" ]; then
+            echo "Health smoke check did not return healthy."
+            exit 1
+          fi
+
+          login_payload="$(
+            jq -nc \
+              --arg username "$POST_ROLLOUT_LOGIN_USERNAME" \
+              --arg password "$POST_ROLLOUT_LOGIN_PASSWORD" \
+              --arg passwordEncoding "${POST_ROLLOUT_LOGIN_PASSWORD_ENCODING:-plain}" \
+              '{username: $username, password: $password, passwordEncoding: $passwordEncoding}'
+          )"
+          login_response="$(connect_call "auth.v1.AuthService/Login" "$login_payload" true)"
+          access_token="$(jq -r '.accessToken // .access_token // ""' <<< "$login_response")"
+          if [ -z "$access_token" ]; then
+            echo "Login smoke check did not return an access token."
+            exit 1
+          fi
+
+          validation_payload="$(jq -nc --arg token "$access_token" '{token: $token}')"
+          validation_response="$(connect_call "auth.v1.AuthService/ValidateToken" "$validation_payload" true)"
+          if [ "$(jq -r '.isValid // .is_valid // false' <<< "$validation_response")" != "true" ]; then
+            echo "ValidateToken smoke check did not return isValid=true."
+            exit 1
+          fi
+        POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES: POST_ROLLOUT_LOGIN_USERNAME POST_ROLLOUT_LOGIN_PASSWORD POST_ROLLOUT_LOGIN_PASSWORD_ENCODING
         POST_ROLLOUT_SMOKE_RETRIES: '12'
         POST_ROLLOUT_SMOKE_SLEEP_SECONDS: '5'
         POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS: '5'
+        POST_ROLLOUT_LOGIN_USERNAME: $(POST_ROLLOUT_LOGIN_USERNAME)
+        POST_ROLLOUT_LOGIN_PASSWORD: $(POST_ROLLOUT_LOGIN_PASSWORD)
+        POST_ROLLOUT_LOGIN_PASSWORD_ENCODING: plain
         ENV_VARIABLE_NAMES: NODE_ENV LOGIN_API_KEY JWT_SECRET JWT_DOC_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL BASE_URL NOTIFICATIONS_GATEWAY_TARGET DB_HOST DB_PORT DB_DATABASE DB_USER DB_PASSWORD NOTIFICATIONS_GRPC_TIMEOUT_MS
         NODE_ENV: production
         LOGIN_API_KEY: $(LOGIN_API_KEY)

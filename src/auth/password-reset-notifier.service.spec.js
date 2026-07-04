@@ -41,16 +41,25 @@ jest.mock('@grpc/grpc-js', () => ({
 describe('PasswordResetNotifierService', () => {
   const originalEnv = { ...process.env };
 
+  function testEnv(overrides = {}) {
+    const env = { ...originalEnv, ...overrides };
+
+    if (!Object.hasOwn(overrides, 'NOTIFICATIONS_GATEWAY_TARGET')) {
+      delete env.NOTIFICATIONS_GATEWAY_TARGET;
+    }
+
+    return env;
+  }
+
   afterEach(() => {
     process.env = originalEnv;
     jest.clearAllMocks();
   });
 
   it('usa BASE_URL como target gRPC del gateway', async () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       BASE_URL: 'academia-dev.eastus2.cloudapp.azure.com:50050',
-    };
+    });
     mockSendEmail.mockImplementation((_email, _options, callback) =>
       callback(null, { success: true }),
     );
@@ -73,11 +82,10 @@ describe('PasswordResetNotifierService', () => {
   });
 
   it('ignora placeholders no resueltos de Azure y usa BASE_URL', () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       BASE_URL: 'academia-dev.eastus2.cloudapp.azure.com:50050',
       NOTIFICATIONS_GATEWAY_TARGET: '$(NOTIFICATIONS_GATEWAY_TARGET)',
-    };
+    });
 
     const service = new PasswordResetNotifierService();
 
@@ -87,11 +95,10 @@ describe('PasswordResetNotifierService', () => {
   });
 
   it('permite usar un target IPv4 del gateway sin cambiar BASE_URL', async () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       BASE_URL: 'academia-dev.eastus2.cloudapp.azure.com:50050',
       NOTIFICATIONS_GATEWAY_TARGET: '20.122.210.230:50050',
-    };
+    });
     mockSendEmail.mockImplementation((_email, _options, callback) =>
       callback(null, { success: true }),
     );
@@ -107,10 +114,9 @@ describe('PasswordResetNotifierService', () => {
   });
 
   it('usa HTTP/2 si BASE_URL es un endpoint HTTP Connect', () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       BASE_URL: 'http://gateway-connect.test',
-    };
+    });
 
     const service = new PasswordResetNotifierService();
     service.getClient();
@@ -125,10 +131,9 @@ describe('PasswordResetNotifierService', () => {
   });
 
   it('reutiliza cliente HTTP Connect y envia correo construido', async () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       BASE_URL: 'https://gateway-connect.test',
-    };
+    });
     const sendEmail = jest.fn().mockResolvedValue({ success: true });
     createClient.mockReturnValueOnce({ sendEmail });
 
@@ -172,10 +177,9 @@ describe('PasswordResetNotifierService', () => {
   });
 
   it('propaga error si el proveedor de correo responde success=false', async () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       BASE_URL: 'https://gateway-connect.test',
-    };
+    });
     createClient.mockReturnValueOnce({
       sendEmail: jest.fn().mockResolvedValue({
         success: false,
@@ -196,10 +200,9 @@ describe('PasswordResetNotifierService', () => {
   });
 
   it('rechaza promesa gRPC y cierra el cliente cuando sendEmail falla', async () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       NOTIFICATIONS_GATEWAY_TARGET: '20.122.210.230:50050',
-    };
+    });
     mockSendEmail.mockImplementation((_email, _options, callback) =>
       callback(new Error('grpc unavailable')),
     );
@@ -223,10 +226,9 @@ describe('PasswordResetNotifierService', () => {
   });
 
   it('respeta timeout gRPC configurado y escapa HTML del correo', () => {
-    process.env = {
-      ...originalEnv,
+    process.env = testEnv({
       NOTIFICATIONS_GRPC_TIMEOUT_MS: '5000',
-    };
+    });
     const service = new PasswordResetNotifierService();
     const before = Date.now() + 4900;
 
