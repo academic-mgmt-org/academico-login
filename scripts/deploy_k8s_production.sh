@@ -3,8 +3,11 @@ set -euo pipefail
 
 require_env() {
   local name="$1"
-  if [ -z "${!name:-}" ]; then
-    echo "Missing required environment variable: $name"
+  local value="${!name:-}"
+  local unresolved_azure_macro_pattern='^\$\([^)]+\)$'
+
+  if [ -z "$value" ] || [[ "$value" =~ $unresolved_azure_macro_pattern ]]; then
+    echo "Missing or unresolved required environment variable: $name"
     exit 1
   fi
 }
