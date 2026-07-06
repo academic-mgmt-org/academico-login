@@ -9,6 +9,19 @@ require_env() {
   fi
 }
 
+require_resolved_env() {
+  local name="$1"
+  local value=""
+
+  require_env "$name"
+  value="${!name}"
+
+  if [[ "$value" =~ ^\$\([A-Za-z_][A-Za-z0-9_.-]*\)$ ]]; then
+    echo "Environment variable $name was not resolved by Azure Pipelines: $value"
+    exit 1
+  fi
+}
+
 validate_env_name() {
   local name="$1"
   if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
@@ -96,7 +109,7 @@ for name in \
   APP_SECRET_NAME \
   APP_PORT \
   ENV_VARIABLE_NAMES; do
-  require_env "$name"
+  require_resolved_env "$name"
 done
 
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-5m}"
@@ -146,7 +159,7 @@ trap cleanup EXIT
 
 for name in $ENV_VARIABLE_NAMES; do
   validate_env_name "$name"
-  require_env "$name"
+  require_resolved_env "$name"
 done
 
 umask 077
@@ -160,7 +173,7 @@ umask 077
 POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES="${POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES:-}"
 for name in $POST_ROLLOUT_SMOKE_ENV_VARIABLE_NAMES; do
   validate_env_name "$name"
-  require_env "$name"
+  require_resolved_env "$name"
 done
 
 {

@@ -230,6 +230,20 @@ parameters:
     DB_USER: '$(DB_USER)'
     DB_PASSWORD: '$(DB_PASSWORD)'
 
+# Values injected into the production Kubernetes secret. The secret keys stay
+# environment-agnostic, but the Azure DevOps variable names are production-only
+# to avoid inheriting shared development DB variables.
+- name: productionEnvVariables
+  type: object
+  default:
+    NODE_ENV: 'production'
+    SERVICE_API_KEY: '$(SERVICE_API_KEY)'
+    DB_HOST: '$(PROD_DB_HOST)'
+    DB_PORT: '$(PROD_DB_PORT)'
+    DB_DATABASE: '$(PROD_DB_DATABASE)'
+    DB_USER: '$(PROD_DB_USER)'
+    DB_PASSWORD: '$(PROD_DB_PASSWORD)'
+
 - name: productionApprovalNotifyUsers
   type: string
   default: 'gacalderonr@utn.edu.ec'
@@ -715,5 +729,5 @@ stages:
         POST_ROLLOUT_SMOKE_SLEEP_SECONDS: '${{ parameters.postRolloutSmokeSleepSeconds }}'
         POST_ROLLOUT_SMOKE_TIMEOUT_SECONDS: '${{ parameters.postRolloutSmokeTimeoutSeconds }}'
         ENV_VARIABLE_NAMES: ${{ parameters.envVariableNames }}
-        ${{ each envVar in parameters.envVariables }}:
+        ${{ each envVar in parameters.productionEnvVariables }}:
           ${{ envVar.key }}: ${{ envVar.value }}
