@@ -704,6 +704,8 @@ stages:
         APP_SECRET_NAME: ${{ parameters.appSecretName }}
         ROLLOUT_TIMEOUT: ${{ parameters.rolloutTimeout }}
         LEGACY_DOCKER_CLEANUP_ENABLED: '${{ parameters.legacyDockerCleanupEnabled }}'
+        LOCAL_PORT_FORWARD_ENABLED: 'true'
+        LOCAL_PORT_FORWARD_ADDRESS: ''
         APP_PORT: '${{ parameters.appPort }}'
         POST_ROLLOUT_SMOKE_ENABLED: '${{ parameters.postRolloutSmokeEnabled }}'
         POST_ROLLOUT_SMOKE_BASE_URL: '${{ parameters.postRolloutSmokeBaseUrl }}'

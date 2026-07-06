@@ -28,6 +28,23 @@ spec:
         - name: acr-pull-secret
       terminationGracePeriodSeconds: 30
       affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - academico-prod-microservicios
+                      - academico-dev-microservicios
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - academico-prod-microservicios
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 50
@@ -51,9 +68,11 @@ spec:
             requests:
               cpu: 250m
               memory: 256Mi
+              ephemeral-storage: 64Mi
             limits:
               cpu: 500m
               memory: 512Mi
+              ephemeral-storage: 512Mi
           lifecycle:
             preStop:
               exec:

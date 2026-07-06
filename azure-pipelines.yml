@@ -488,6 +488,8 @@ stages:
         APP_SECRET_NAME: academico-login-env
         ROLLOUT_TIMEOUT: 5m
         LEGACY_DOCKER_CLEANUP_ENABLED: 'true'
+        LOCAL_PORT_FORWARD_ENABLED: 'true'
+        LOCAL_PORT_FORWARD_ADDRESS: ''
         APP_PORT: '3001'
         POST_ROLLOUT_SMOKE_ENABLED: 'true'
         POST_ROLLOUT_SMOKE_BASE_URL: 'http://127.0.0.1:3001'
