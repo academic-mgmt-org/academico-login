@@ -470,6 +470,22 @@ ensure_local_port_forward() {
     exit 1
   fi
 
+  unit_name="academico-${K8S_NAMESPACE}-${K8S_DEPLOYMENT}-${app_port}-port-forward.service"
+  if command -v ss >/dev/null 2>&1 \
+    && ss -ltn "sport = :$app_port" | awk 'NR > 1 { found = 1 } END { exit found ? 0 : 1 }'; then
+    if command -v systemctl >/dev/null 2>&1 \
+      && ! systemctl is-active --quiet "$unit_name"; then
+      if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        sudo systemctl disable --now "$unit_name" >/dev/null 2>&1 || true
+        sudo rm -f "/etc/systemd/system/$unit_name"
+        sudo systemctl daemon-reload
+      fi
+    fi
+
+    echo "Local port $app_port is already listening; leaving the existing listener in place. Post-rollout smoke test will validate it."
+    return
+  fi
+
   if ! command -v systemctl >/dev/null 2>&1; then
     echo "systemctl is required to persist local port-forward."
     exit 1
@@ -494,7 +510,6 @@ ensure_local_port_forward() {
     kubeconfig_line="Environment=KUBECONFIG=$home_dir/.kube/config"
   fi
 
-  unit_name="academico-${K8S_NAMESPACE}-${K8S_DEPLOYMENT}-${app_port}-port-forward.service"
   unit_path="/etc/systemd/system/$unit_name"
   forward_script_path="$home_dir/.local/bin/$unit_name.sh"
   endpoint_ref="endpoints/$K8S_DEPLOYMENT"
