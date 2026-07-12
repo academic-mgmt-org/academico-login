@@ -987,7 +987,19 @@ El script realiza las siguientes acciones:
 - Crea o reemplaza el contenedor `academico-login`.
 - Expone el puerto definido en `PORT`.
 
-## 19.4 Comandos útiles
+## 19.4 Ejecutar con Docker Compose en Windows
+
+Con Docker Desktop iniciado y desde PowerShell, ubicarse en la carpeta del repositorio y ejecutar:
+
+```powershell
+docker compose pull
+docker network create academico-backend
+docker compose up
+```
+
+La red externa `academico-backend` se crea una sola vez. Si ya existe, no es necesario volver a ejecutar `docker network create academico-backend`.
+
+## 19.5 Comandos útiles
 
 Verificar el contenedor:
 
