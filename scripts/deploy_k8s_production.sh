@@ -626,6 +626,58 @@ run_post_rollout_smoke_test() {
   exit 1
 }
 
+reconcile_deployment_node_selector() {
+  local manifest="$K8S_REMOTE_MANIFEST_PATH/deployment.yml"
+  local desired_node_selector=""
+  local current_node_selector=""
+  local operation=""
+  local patch=""
+
+  if [ ! -f "$manifest" ]; then
+    return
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "jq is required to reconcile the deployment node selector."
+    exit 1
+  fi
+
+  desired_node_selector="$(
+    kubectl apply --dry-run=client -f "$manifest" -o json \
+      | jq -Sc '.spec.template.spec.nodeSelector // null'
+  )"
+  current_node_selector="$(
+    kubectl -n "$K8S_NAMESPACE" get deployment "$K8S_DEPLOYMENT" -o json \
+      | jq -Sc '.spec.template.spec.nodeSelector // null'
+  )"
+
+  if [ "$current_node_selector" = "$desired_node_selector" ]; then
+    return
+  fi
+
+  if [ "$desired_node_selector" = "null" ]; then
+    patch='[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]'
+  else
+    if [ "$current_node_selector" = "null" ]; then
+      operation="add"
+    else
+      operation="replace"
+    fi
+
+    patch="$(
+      jq -cn \
+        --arg operation "$operation" \
+        --argjson value "$desired_node_selector" \
+        '[{op: $operation, path: "/spec/template/spec/nodeSelector", value: $value}]'
+    )"
+  fi
+
+  echo "Reconciling deployment node selector with $manifest..."
+  kubectl -n "$K8S_NAMESPACE" patch deployment "$K8S_DEPLOYMENT" \
+    --type=json \
+    -p "$patch"
+}
+
 kubectl apply -f "$K8S_REMOTE_MANIFEST_PATH/namespace.yml"
 
 kubectl -n "$K8S_NAMESPACE" create secret generic "$APP_SECRET_NAME" \
@@ -648,6 +700,7 @@ if [ -f "$K8S_REMOTE_MANIFEST_PATH/deployment.yml" ]; then
 fi
 
 kubectl apply -f "$K8S_REMOTE_MANIFEST_PATH"
+reconcile_deployment_node_selector
 kubectl -n "$K8S_NAMESPACE" set image "deployment/$K8S_DEPLOYMENT" "$K8S_CONTAINER=$IMAGE"
 kubectl -n "$K8S_NAMESPACE" rollout status "deployment/$K8S_DEPLOYMENT" --timeout="$ROLLOUT_TIMEOUT"
 kubectl -n "$K8S_NAMESPACE" get deployment,service,hpa,pdb -l app.kubernetes.io/name="$K8S_DEPLOYMENT" -o wide
